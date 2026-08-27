@@ -1,4 +1,5 @@
 --Class 1--
+-- A Intro to Databases / DBMS
 
 Create Database lab_6020;
 
