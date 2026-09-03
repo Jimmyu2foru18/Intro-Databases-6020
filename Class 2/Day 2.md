@@ -940,3 +940,226 @@ HAVING COUNT(DISTINCT c.cname) = 2;
 ```
 
 These examples demonstrate how ORDER BY, GROUP BY, HAVING, and JOINs work together to answer complex questions.
+
+---
+
+## NULL Values in SQL
+
+`NULL` represents missing, unknown, or inapplicable data. It is important to understand how NULL behaves in SQL because it affects comparisons, aggregates, and joins.
+
+### What is NULL?
+
+- `NULL` is not the same as `0`, `''` (empty string), or `FALSE`.
+- It indicates the absence of a value.
+- Any comparison with `NULL` using `=`, `<`, `>`, etc. returns `NULL` (unknown), not `TRUE` or `FALSE`.
+
+### Testing for NULL
+
+Use `IS NULL` and `IS NOT NULL` to test for NULL values.
+
+```sql
+-- Find students with NULL email
+SELECT sname, email
+FROM Students
+WHERE email IS NULL;
+
+-- Find students with non-NULL email
+SELECT sname, email
+FROM Students
+WHERE email IS NOT NULL;
+```
+
+### NULL in Aggregates
+
+Aggregate functions behave differently with NULL:
+
+- `COUNT(*)` counts all rows, including those with NULL values.
+- `COUNT(column)` counts only non-NULL values.
+- `SUM`, `AVG`, `MIN`, `MAX` ignore NULL values.
+
+```sql
+-- Example: Students table with some NULL ages
+INSERT INTO Students VALUES (4, 'Dave', NULL, 'dave@mail.com');
+INSERT INTO Students VALUES (5, 'Eve', 25, 'eve@mail.com');
+
+-- COUNT(*) counts all students
+SELECT COUNT(*) AS TotalStudents FROM Students;
+
+-- COUNT(age) counts only students with non-NULL age
+SELECT COUNT(age) AS StudentsWithAge FROM Students;
+
+-- AVG(age) ignores NULL ages
+SELECT AVG(age) AS AvgAge FROM Students;
+```
+
+### Handling NULLs with COALESCE and IFNULL
+
+Use `COALESCE` or `IFNULL` to replace NULL with a default value.
+
+```sql
+-- Replace NULL age with 0
+SELECT sname, COALESCE(age, 0) AS age
+FROM Students;
+
+-- MySQL-specific: IFNULL
+SELECT sname, IFNULL(age, 0) AS age
+FROM Students;
+```
+
+### NULL in Joins
+
+NULL values do not match each other in JOINs.
+
+```sql
+-- Students with NULL email will not match other NULL emails in a join
+-- This is important when using JOINs with nullable columns
+```
+
+### NULLIF Function
+
+`NULLIF` returns NULL if two expressions are equal; otherwise, it returns the first expression.
+
+```sql
+-- Example: Convert empty string to NULL
+SELECT NULLIF('', ' ') AS result;  -- Returns NULL if string is empty
+```
+
+### Practical NULL Examples
+
+```sql
+-- Find students who have not enrolled in any course (NULL in Enrollments)
+SELECT s.sname
+FROM Students s
+LEFT JOIN Enrollments e ON s.sid = e.sid
+WHERE e.sid IS NULL;
+
+-- Find products with NULL price
+SELECT pname, price
+FROM Products
+WHERE price IS NULL;
+
+-- Replace NULL prices with average price
+SELECT pname, COALESCE(price, (SELECT AVG(price) FROM Products)) AS price
+FROM Products;
+```
+
+### Important NULL Rules
+
+1. `NULL = NULL` is `NULL` (unknown), not `TRUE`. Use `IS NULL` instead.
+2. `NULL != NULL` is also `NULL`.
+3. `NULL` in arithmetic expressions results in `NULL`.
+4. `NULL` in string concatenation results in `NULL`.
+5. Aggregate functions ignore `NULL` values (except `COUNT(*)`).
+
+---
+
+# Day 2 SQL Script Analysis: NULL Handling and Advanced Examples
+
+## NULL Values in SQL
+
+`NULL` represents missing, unknown, or inapplicable data. It is important to understand how NULL behaves in SQL because it affects comparisons, aggregates, and joins.
+
+### What is NULL?
+
+- `NULL` is not the same as `0`, `''` (empty string), or `FALSE`.
+- It indicates the absence of a value.
+- Any comparison with `NULL` using `=`, `<`, `>`, etc. returns `NULL` (unknown), not `TRUE` or `FALSE`.
+
+### Testing for NULL
+
+Use `IS NULL` and `IS NOT NULL` to test for NULL values.
+
+```sql
+-- Find students with NULL email
+SELECT sname, email
+FROM Students
+WHERE email IS NULL;
+
+-- Find students with non-NULL email
+SELECT sname, email
+FROM Students
+WHERE email IS NOT NULL;
+```
+
+### NULL in Aggregates
+
+Aggregate functions behave differently with NULL:
+
+- `COUNT(*)` counts all rows, including those with NULL values.
+- `COUNT(column)` counts only non-NULL values.
+- `SUM`, `AVG`, `MIN`, `MAX` ignore NULL values.
+
+```sql
+-- Example: Students table with some NULL ages
+INSERT INTO Students VALUES (4, 'Dave', NULL, 'dave@mail.com');
+INSERT INTO Students VALUES (5, 'Eve', 25, 'eve@mail.com');
+
+-- COUNT(*) counts all students
+SELECT COUNT(*) AS TotalStudents FROM Students;
+
+-- COUNT(age) counts only students with non-NULL age
+SELECT COUNT(age) AS StudentsWithAge FROM Students;
+
+-- AVG(age) ignores NULL ages
+SELECT AVG(age) AS AvgAge FROM Students;
+```
+
+### Handling NULLs with COALESCE and IFNULL
+
+Use `COALESCE` or `IFNULL` to replace NULL with a default value.
+
+```sql
+-- Replace NULL age with 0
+SELECT sname, COALESCE(age, 0) AS age
+FROM Students;
+
+-- MySQL-specific: IFNULL
+SELECT sname, IFNULL(age, 0) AS age
+FROM Students;
+```
+
+### NULL in Joins
+
+NULL values do not match each other in JOINs.
+
+```sql
+-- Students with NULL email will not match other NULL emails in a join
+-- This is important when using JOINs with nullable columns
+```
+
+### NULLIF Function
+
+`NULLIF` returns NULL if two expressions are equal; otherwise, it returns the first expression.
+
+```sql
+-- Example: Convert empty string to NULL
+SELECT NULLIF('', ' ') AS result;  -- Returns NULL if string is empty
+```
+
+### Practical NULL Examples
+
+```sql
+-- Find students who have not enrolled in any course (NULL in Enrollments)
+SELECT s.sname
+FROM Students s
+LEFT JOIN Enrollments e ON s.sid = e.sid
+WHERE e.sid IS NULL;
+
+-- Find products with NULL price
+SELECT pname, price
+FROM Products
+WHERE price IS NULL;
+
+-- Replace NULL prices with average price
+SELECT pname, COALESCE(price, (SELECT AVG(price) FROM Products)) AS price
+FROM Products;
+```
+
+### Important NULL Rules
+
+1. `NULL = NULL` is `NULL` (unknown), not `TRUE`. Use `IS NULL` instead.
+2. `NULL != NULL` is also `NULL`.
+3. `NULL` in arithmetic expressions results in `NULL`.
+4. `NULL` in string concatenation results in `NULL`.
+5. Aggregate functions ignore `NULL` values (except `COUNT(*)`).
+

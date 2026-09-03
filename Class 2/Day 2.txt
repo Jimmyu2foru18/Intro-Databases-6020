@@ -632,3 +632,82 @@ SQL:
   WHERE c.cname IN ('Databases', 'Algorithms')
   GROUP BY s.sid, s.sname
   HAVING COUNT(DISTINCT c.cname) = 2;
+
+These examples demonstrate how ORDER BY, GROUP BY, HAVING, and JOINs work together to answer complex questions.
+
+
+NULL Values in SQL
+===================
+
+1. What is NULL?
+----------------
+NULL represents missing, unknown, or inapplicable data in SQL.
+
+Key points:
+- NULL is not the same as 0, empty string, or FALSE.
+- NULL indicates the absence of a value.
+- Any comparison with NULL using =, <, >, etc. returns NULL (unknown), not TRUE or FALSE.
+
+2. Testing for NULL
+-------------------
+Use IS NULL and IS NOT NULL to test for NULL values.
+
+SQL:
+  SELECT sname, email FROM Students WHERE email IS NULL;
+  SELECT sname, email FROM Students WHERE email IS NOT NULL;
+
+3. NULL in Aggregates
+---------------------
+Aggregate functions behave differently with NULL:
+
+- COUNT(*) counts all rows, including those with NULL values.
+- COUNT(column) counts only non-NULL values.
+- SUM, AVG, MIN, MAX ignore NULL values.
+
+SQL:
+  SELECT COUNT(*) AS TotalStudents FROM Students;
+  SELECT COUNT(age) AS StudentsWithAge FROM Students;
+  SELECT AVG(age) AS AvgAge FROM Students;
+
+4. Handling NULLs with COALESCE and IFNULL
+------------------------------------------
+Use COALESCE or IFNULL to replace NULL with a default value.
+
+SQL:
+  SELECT sname, COALESCE(age, 0) AS age FROM Students;
+  SELECT sname, IFNULL(age, 0) AS age FROM Students;
+
+5. NULL in Joins
+----------------
+NULL values do not match each other in JOINs. This is important when using JOINs with nullable columns.
+
+6. NULLIF Function
+------------------
+NULLIF returns NULL if two expressions are equal; otherwise, it returns the first expression.
+
+SQL:
+  SELECT NULLIF('', '') AS result;  -- Returns NULL if strings are equal
+
+7. Practical NULL Examples
+---------------------------
+SQL:
+  -- Find students who have not enrolled in any course
+  SELECT s.sname
+  FROM Students s
+  LEFT JOIN Enrollments e ON s.sid = e.sid
+  WHERE e.sid IS NULL;
+
+  -- Find products with NULL price
+  SELECT pname, price FROM Products WHERE price IS NULL;
+
+  -- Replace NULL prices with average price
+  SELECT pname, COALESCE(price, (SELECT AVG(price) FROM Products)) AS price
+  FROM Products;
+
+8. Important NULL Rules
+-----------------------
+1. NULL = NULL is NULL (unknown), not TRUE. Use IS NULL instead.
+2. NULL != NULL is also NULL.
+3. NULL in arithmetic expressions results in NULL.
+4. NULL in string concatenation results in NULL.
+5. Aggregate functions ignore NULL values (except COUNT(*)).

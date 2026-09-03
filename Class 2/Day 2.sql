@@ -175,3 +175,56 @@ INSERT INTO Students VALUES (4, 'Eve', 3, 'eve@mail.com');
 -- Subquery example
 SELECT sname FROM Students 
 WHERE sid IN (SELECT sid FROM Enrollments WHERE cid = 101);
+
+-- ==========================================
+-- NULL Examples
+-- ==========================================
+
+-- Insert students with NULL values
+INSERT INTO Students VALUES (4, 'Dave', NULL, 'dave@mail.com');
+INSERT INTO Students VALUES (5, 'Eve', 25, NULL);
+
+-- Find students with NULL email
+SELECT sname, email
+FROM Students
+WHERE email IS NULL;
+
+-- Find students with non-NULL email
+SELECT sname, email
+FROM Students
+WHERE email IS NOT NULL;
+
+-- COUNT(*) counts all rows, including NULLs
+SELECT COUNT(*) AS TotalStudents FROM Students;
+
+-- COUNT(age) counts only non-NULL ages
+SELECT COUNT(age) AS StudentsWithAge FROM Students;
+
+-- AVG(age) ignores NULL ages
+SELECT AVG(age) AS AvgAge FROM Students;
+
+-- COALESCE: Replace NULL with default value
+SELECT sname, COALESCE(age, 0) AS age
+FROM Students;
+
+-- IFNULL (MySQL-specific): Replace NULL with default value
+SELECT sname, IFNULL(age, 0) AS age
+FROM Students;
+
+-- NULLIF: Returns NULL if two expressions are equal
+SELECT NULLIF('', '') AS result;  -- Returns NULL
+
+-- Find students who have not enrolled in any course
+SELECT s.sname
+FROM Students s
+LEFT JOIN Enrollments e ON s.sid = e.sid
+WHERE e.sid IS NULL;
+
+-- Find products with NULL price (if any)
+SELECT pname, price
+FROM Products
+WHERE price IS NULL;
+
+-- Replace NULL prices with average price
+SELECT pname, COALESCE(price, (SELECT AVG(price) FROM Products)) AS price
+FROM Products;
