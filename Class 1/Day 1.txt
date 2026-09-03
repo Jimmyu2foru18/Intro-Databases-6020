@@ -1,0 +1,16 @@
+Why DBMS Exists?
+What are the types of DBMS Systems?
+Data Models:
+-	Relational model 
+-	Key/value
+-	Document
+-	Graph
+-	Network
+
+-	Data Types (under relational models):
+What is a Database?
+A large, integrated collection of data.
+Models a real-world Enterprise.
+
+
+
