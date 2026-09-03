@@ -1,16 +1,328 @@
-Why DBMS Exists?
-What are the types of DBMS Systems?
-Data Models:
--	Relational model 
--	Key/value
--	Document
--	Graph
--	Network
+Day 1: Introduction to Databases and DBMS
+==========================================
 
--	Data Types (under relational models):
-What is a Database?
-A large, integrated collection of data.
-Models a real-world Enterprise.
+1. Why DBMS Exists?
+-------------------
+Before Database Management Systems, data was stored in file systems. This approach had several critical problems:
+
+- Data Redundancy: The same data was duplicated in multiple files.
+- Data Inconsistency: Updates in one file might not be reflected in others.
+- Difficult Data Access: Users needed to know the exact file structure and location.
+- Lack of Security: File systems offered limited access control.
+- No Concurrent Access: Multiple users could not safely read/write simultaneously.
+- No Backup/Recovery: Data loss was common after crashes.
+
+A DBMS solves these problems by providing:
+- A centralized repository for data.
+- Controlled access and security.
+- Transaction management (ACID properties).
+- Reduced redundancy through data integration.
+- Data independence (applications are insulated from storage details).
+
+2. Types of DBMS Systems
+------------------------
+There are several major types of database management systems, each suited to different data models and use cases:
+
+- Relational DBMS (RDBMS): Data is organized in tables (relations) with rows and columns. Examples: MySQL, PostgreSQL, Oracle, SQL Server. Uses SQL for querying.
+- Key/Value DBMS: Data is stored as key-value pairs, optimized for high-speed lookups. Examples: Redis, DynamoDB.
+- Document DBMS: Data is stored as documents (usually JSON/BSON), allowing flexible schemas. Examples: MongoDB, Couchbase.
+- Graph DBMS: Data is stored as nodes and edges, optimized for relationship-heavy queries. Examples: Neo4j, Amazon Neptune.
+- Network DBMS: Data is organized in a network structure using records and sets. Example: IDMS (older system).
+
+3. Data Models
+--------------
+A data model defines how data is structured, stored, and accessed.
+
+- Relational Model: Data is organized into tables (relations). Each table has rows (tuples) and columns (attributes). Relationships between tables are established through keys. This is the most widely used model and forms the basis of SQL.
+- Key/Value Model: Simple model where each data item has a unique key and an associated value. Extremely fast for reads/writes by key.
+- Document Model: Stores semi-structured data as documents (e.g., JSON). Each document can have a different structure, offering schema flexibility.
+- Graph Model: Represents data as a graph of nodes (entities) and edges (relationships). Ideal for social networks, recommendation engines, and fraud detection.
+- Network Model: A generalization of the hierarchical model where a record can have multiple parent records. More flexible than hierarchical but complex to maintain.
+
+4. Data Types (Under Relational Models)
+---------------------------------------
+In SQL-based relational databases, columns are defined with specific data types:
+
+- Numeric Types:
+  - INT / INTEGER: Whole numbers.
+  - DECIMAL(p,s) / NUMERIC(p,s): Fixed-point numbers with precision (p) and scale (s). Example: DECIMAL(5,2) allows values like 999.99.
+  - FLOAT / DOUBLE: Floating-point numbers for approximate values.
+
+- String Types:
+  - CHAR(n): Fixed-length string.
+  - VARCHAR(n): Variable-length string up to n characters.
+  - TEXT: Large text data.
+
+- Date/Time Types:
+  - DATE: Date value (YYYY-MM-DD).
+  - TIME: Time value.
+  - DATETIME / TIMESTAMP: Combined date and time.
+
+- Boolean Type:
+  - BOOLEAN: True/False values.
+
+5. What is a Database?
+----------------------
+A database is a large, integrated collection of structured data. It models a real-world enterprise by representing entities (e.g., products, students, orders) and the relationships between them.
+
+Key characteristics of a database:
+- It is shared and used by multiple users or applications.
+- It is organized to minimize redundancy and inconsistency.
+- It represents some aspect of the real world (the "mini-world").
+- It is designed, built, and populated with data for a specific purpose.
+- A DBMS is the software system that manages the database and provides controlled access to it.
 
 
+Day 1 SQL Script Analysis
+==========================
+
+The Day 1 SQL script demonstrates foundational database operations. Below is a detailed breakdown of each section and the concepts illustrated.
+
+1. Database and Table Creation
+------------------------------
+SQL:
+  Create Database lab_6020;
+  Create table Products(
+    pname varchar(20),
+    price decimal(5,2),
+    category varchar(20),
+    manufacturer varchar (40)
+  );
+
+Explanation:
+- `CREATE DATABASE` creates a new database named `lab_6020`.
+- `CREATE TABLE` defines a new table called `Products` with four columns:
+  - `pname`: variable-length string up to 20 characters.
+  - `price`: fixed-point decimal with precision 5 and scale 2. This means the total number of digits is 5, with 2 digits after the decimal point. The maximum value is 999.99.
+  - `category`: variable-length string up to 20 characters.
+  - `manufacturer`: variable-length string up to 40 characters.
+
+2. Inserting Data and Data Type Limits
+---------------------------------------
+SQL:
+  insert into Products values("IPhone 13","299.99","Cellphone","Apple");
+  insert into Products values("IPhone 17 Pro","1299.99","Cellphone","Apple");
+  --didnt work? why? --
+  --because we only have 5 types for price--
+
+  ALTER TABLE Products MODIFY COLUMN price DECIMAL(7,2);
+  insert into Products values("IPhone 17 Pro","1299.99","Cellphone","Apple");
+
+Explanation:
+- The first insert succeeds because 299.99 fits within DECIMAL(5,2).
+- The second insert fails because 1299.99 has 6 digits total (4 before decimal, 2 after), exceeding the precision of 5.
+- `ALTER TABLE ... MODIFY COLUMN` changes the `price` column to DECIMAL(7,2), allowing up to 99999.99.
+- After the alteration, the same insert succeeds.
+
+Key Takeaway: Always define data types with enough precision to hold expected values. If unsure, use a larger precision.
+
+3. Dropping a Table
+-------------------
+SQL:
+  Drop table Products;
+  insert into Products values("IPhone 17 Pro","Cellphone","Apple");
+
+Explanation:
+- `DROP TABLE Products` deletes the entire table and all its data.
+- The subsequent `INSERT` fails because the table no longer exists.
+- `DROP` is permanent and cannot be undone (unless you have a backup).
+
+4. Partial Inserts and Primary Keys
+------------------------------------
+SQL:
+  insert into Products(pname,manufacturer,catagory)
+  values("IPhone 11","Apple","Cellphone");
+
+  ALTER TABLE Products ADD PRIMARY KEY (pname, manufacturer);
+
+Explanation:
+- When inserting, you can specify only certain columns. Unspecified columns will be NULL (unless they have a DEFAULT or NOT NULL constraint).
+- The column name `catagory` appears to be a typo for `category`. This insert would succeed only if a column named `catagory` exists or if it is ignored.
+- A Primary Key uniquely identifies each row in a table. Here, the combination of `pname` and `manufacturer` is set as the primary key. This means no two rows can have the same pair of values for both columns.
+
+5. Resetting Data with TRUNCATE
+--------------------------------
+SQL:
+  Truncate Table Products;
+  INSERT INTO Products VALUES ('Gizmo', 19.99, 'Gadgets', 'GizmoWorks');
+  ...
+
+Explanation:
+- `TRUNCATE TABLE` removes all rows from a table quickly but keeps the table structure intact.
+- It is faster than `DELETE FROM table` because it does not log individual row deletions.
+- After truncation, new sample data is inserted for query practice.
+
+6. SELECT, FROM, WHERE
+-----------------------
+SQL:
+  SELECT pname, manufacturer, price FROM Products WHERE category = 'Gadgets';
+  SELECT pname, manufacturer FROM Products WHERE category = 'Gadgets';
+
+Explanation:
+- `SELECT` specifies which columns to retrieve.
+- `FROM` specifies the table.
+- `WHERE` filters rows based on a condition.
+- The first query returns three columns for products in the 'Gadgets' category.
+- The second query returns only two columns for the same filtered rows.
+
+7. ORDER BY
+-----------
+SQL:
+  SELECT pname, price, category FROM Products ORDER BY price DESC;
+  SELECT pname, price, category FROM Products ORDER BY category ASC, price DESC;
+
+Explanation:
+- `ORDER BY price DESC` sorts results from highest to lowest price.
+- You can sort by multiple columns: `ORDER BY category ASC, price DESC` sorts by category A-Z, then price highest to lowest within each category.
+- `ASC` is the default sort order.
+
+8. GROUP BY and HAVING
+-----------------------
+SQL:
+  SELECT category, COUNT(*) AS product_count
+  FROM Products
+  GROUP BY category;
+
+  SELECT category, COUNT(*) AS product_count
+  FROM Products
+  GROUP BY category
+  HAVING COUNT(*) > 1;
+
+Explanation:
+- `GROUP BY category` groups all rows with the same category together.
+- `COUNT(*)` counts how many products are in each category.
+- `HAVING COUNT(*) > 1` filters to show only categories with more than one product.
+- `HAVING` is used after grouping, while `WHERE` filters rows before grouping.
+
+9. JOINs with Orders Table
+---------------------------
+SQL:
+  Create table Orders(
+    order_id int PRIMARY KEY,
+    pname varchar(20),
+    quantity int,
+    order_date date,
+    FOREIGN KEY (pname) REFERENCES Products(pname)
+  );
+
+  INSERT INTO Orders VALUES (1, 'Gizmo', 10, '2024-01-15');
+  INSERT INTO Orders VALUES (2, 'Powergizmo', 5, '2024-01-16');
+  INSERT INTO Orders VALUES (3, 'SingleTouch', 3, '2024-01-17');
+
+  -- INNER JOIN
+  SELECT Products.pname, Products.price, Orders.quantity, Orders.order_date
+  FROM Products
+  INNER JOIN Orders ON Products.pname = Orders.pname;
+
+  -- LEFT JOIN
+  SELECT Products.pname, Products.price, Orders.quantity
+  FROM Products
+  LEFT JOIN Orders ON Products.pname = Orders.pname;
+
+Explanation:
+- The `Orders` table is created with a foreign key linking to `Products.pname`.
+- INNER JOIN returns only rows where there is a match in both tables (products that have orders).
+- LEFT JOIN returns all products, even those without orders (quantity will be NULL).
+- This demonstrates how JOINs relate data across multiple tables.
+
+10. Handling Special Column Names
+---------------------------------
+SQL:
+  create table student(`Student name` varchar(20));
+  select `Student name` from student;
+
+Explanation:
+- Column names with spaces or reserved words must be enclosed in backticks (`) in MySQL.
+- This creates a table with a column named `Student name` (with a space) and queries it successfully using backticks.
+
+11. INTERSECT Workaround (MySQL)
+--------------------------------
+SQL:
+  -- MySQL does not support INTERSECT directly.
+  -- Equivalent using INNER JOIN:
+  SELECT DISTINCT p1.pname
+  FROM Products p1
+  INNER JOIN Products p2 ON p1.pname = p2.pname
+  WHERE p1.category = 'Gadgets' AND p2.price > 100;
+
+Explanation:
+- `INTERSECT` returns distinct rows that appear in both result sets.
+- Since MySQL doesn't support INTERSECT, we use an INNER JOIN on the same table with different conditions.
+- This query finds products that are both in the 'Gadgets' category AND have a price over 100.
+
+
+Day 1 Deep Dive: SQL ORDER BY, JOINS, INTERSECT, and HAVING
+=============================================================
+
+Although Day 1 focuses on basics, understanding these advanced concepts early provides a strong foundation.
+
+1. ORDER BY
+-----------
+The `ORDER BY` clause sorts the result set by one or more columns.
+
+Syntax:
+  SELECT column1, column2 FROM table_name ORDER BY column1 [ASC|DESC];
+
+Example:
+  SELECT pname, price FROM Products ORDER BY price DESC;
+
+This returns products sorted from highest to lowest price. Use `ASC` for ascending order (default).
+
+2. JOIN Operations
+------------------
+JOINs combine rows from two or more tables based on a related column.
+
+- INNER JOIN: Returns rows when there is a match in both tables.
+
+  Example:
+    SELECT Products.pname, Orders.quantity
+    FROM Products
+    INNER JOIN Orders ON Products.pid = Orders.pid;
+
+- LEFT JOIN (or LEFT OUTER JOIN): Returns all rows from the left table, and matched rows from the right table. Unmatched rows from the right table show NULL.
+
+  Example:
+    SELECT Products.pname, Orders.quantity
+    FROM Products
+    LEFT JOIN Orders ON Products.pid = Orders.pid;
+
+- RIGHT JOIN: Opposite of LEFT JOIN. Returns all rows from the right table.
+
+- FULL JOIN: Returns rows when there is a match in one of the tables. (Use UNION of LEFT and RIGHT JOIN in MySQL, since FULL JOIN is not directly supported.)
+
+- Self Join: A table is joined to itself.
+
+  Example:
+    SELECT A.pname AS Product1, B.pname AS Product2, A.category
+    FROM Products A, Products B
+    WHERE A.pid <> B.pid AND A.category = B.category;
+
+3. INTERSECT
+------------
+INTERSECT returns distinct rows that appear in both result sets.
+
+Syntax:
+  SELECT column1 FROM table1
+  INTERSECT
+  SELECT column1 FROM table2;
+
+Example:
+  SELECT pname FROM Products WHERE category = 'Gadgets'
+  INTERSECT
+  SELECT pname FROM Products WHERE price > 100;
+
+Note: MySQL does not support INTERSECT directly. Use `INNER JOIN` or `WHERE ... IN` as an alternative.
+
+4. HAVING Clause
+----------------
+The `HAVING` clause filters groups created by `GROUP BY`. It is similar to `WHERE`, but `WHERE` filters individual rows before grouping, while `HAVING` filters after grouping.
+
+Syntax:
+  SELECT column, COUNT(*) FROM table GROUP BY column HAVING COUNT(*) > 1;
+
+Example:
+  SELECT category, COUNT(*) AS product_count
+  FROM Products
+  GROUP BY category
+  HAVING COUNT(*) > 1;
 
