@@ -147,6 +147,27 @@ SELECT Products.pname, Products.price, Orders.quantity
 FROM Products
 LEFT JOIN Orders ON Products.pname = Orders.pname;
 
+-- RIGHT JOIN: All orders, even if product was deleted
+-- (Shows orders for products that may not exist in Products table)
+SELECT Products.pname, Orders.quantity, Orders.order_date
+FROM Products
+RIGHT JOIN Orders ON Products.pname = Orders.pname;
+
+-- FULL JOIN workaround: All products AND all orders
+-- MySQL does not support FULL JOIN directly
+SELECT Products.pname, Orders.quantity, Orders.order_date
+FROM Products
+LEFT JOIN Orders ON Products.pname = Orders.pname
+UNION
+SELECT Products.pname, Orders.quantity, Orders.order_date
+FROM Products
+RIGHT JOIN Orders ON Products.pname = Orders.pname;
+
+-- Self Join: Find pairs of products in the same category
+SELECT A.pname AS Product1, B.pname AS Product2, A.category
+FROM Products A
+JOIN Products B ON A.pname < B.pname AND A.category = B.category;
+
 -- ==========================================
 -- 11. INTERSECT Workaround (MySQL)
 -- ==========================================

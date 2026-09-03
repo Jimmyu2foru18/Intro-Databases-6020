@@ -124,6 +124,38 @@ FROM Students s
 LEFT JOIN Enrollments e ON s.sid = e.sid
 LEFT JOIN Courses c ON e.cid = c.cid;
 
+-- RIGHT JOIN example
+-- Shows all courses, even those with no students enrolled
+SELECT s.sname, c.cname
+FROM Students s
+RIGHT JOIN Enrollments e ON s.sid = e.sid
+RIGHT JOIN Courses c ON e.cid = c.cid;
+
+-- FULL JOIN workaround (MySQL does not support FULL JOIN directly)
+-- Shows all students AND all courses, with NULLs where no match exists
+SELECT s.sname, c.cname
+FROM Students s
+LEFT JOIN Enrollments e ON s.sid = e.sid
+LEFT JOIN Courses c ON e.cid = c.cid
+UNION
+SELECT s.sname, c.cname
+FROM Students s
+RIGHT JOIN Enrollments e ON s.sid = e.sid
+RIGHT JOIN Courses c ON e.cid = c.cid;
+
+-- Self Join example
+-- Find pairs of students with the same age
+SELECT A.sname AS Student1, B.sname AS Student2, A.age
+FROM Students A
+JOIN Students B ON A.sid < B.sid AND A.age = B.age;
+
+-- INTERSECT workaround (MySQL does not support INTERSECT directly)
+-- Find course names that are both in Databases/Algorithms AND have credits > 3
+SELECT DISTINCT c1.cname
+FROM Courses c1
+INNER JOIN Courses c2 ON c1.cname = c2.cname
+WHERE c1.cname IN ('Databases', 'Algorithms') AND c2.credits > 3;
+
 --Next--
 
 -- What if we try to insert a duplicate primary key?
