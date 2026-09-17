@@ -1,0 +1,423 @@
+# Day 4: ERD to Relational Database Design - Congress Tracking System
+
+## 1. ERD Overview
+
+The Class 4 ERD models a congressional tracking system with three main entities:
+State, Congress person, and Bill. The relationships between them capture how
+congress people represent states, sponsor bills, and vote on bills.
+
+![Class 4 ERD](Class 4.png)
+
+## 2. Entities and Attributes
+
+### State
+- `name` (Primary Key)
+- `region`
+
+### Congress person
+- `name` (Primary Key)
+- `party`
+
+### Bill
+- `name` (Primary Key)
+- `vote_date`
+- `passed_failed` (dashed oval in ERD, indicates derived status)
+
+## 3. Relationships
+
+### represents
+- Connects State to Congress person
+- Attributes: `district`, `since`
+- Captures which district a congress person represents and since when
+
+### sponsor
+- Connects Congress person to Bill
+- No additional attributes in the ERD
+- Captures which congress person sponsored a bill
+
+### vote
+- Connects Congress person to Bill
+- Attributes: `vote_type`, `vote_date`
+- Captures how and when a congress person voted on a bill
+
+## 4. Converting ERD to Relational Schema
+
+Rules for converting ERD to relational tables:
+- Each entity becomes a table
+- Each attribute becomes a column
+- Primary keys become PRIMARY KEY constraints
+- Relationships with attributes become junction tables
+- Relationship attributes become columns in the junction table
+
+**Strong Entities:**
+```sql
+State(name, region)
+CongressPerson(name, party)
+Bill(name, vote_date, passed_failed)
+```
+
+**Relationship Tables:**
+```sql
+Represents(state_name, person_name, district, since)
+Sponsor(person_name, bill_name)
+Vote(person_name, bill_name, vote_type, vote_date)
+```
+
+**Foreign Keys:**
+- `Represents.state_name` -> `State.name`
+- `Represents.person_name` -> `CongressPerson.name`
+- `Sponsor.person_name` -> `CongressPerson.name`
+- `Sponsor.bill_name` -> `Bill.name`
+- `Vote.person_name` -> `CongressPerson.name`
+- `Vote.bill_name` -> `Bill.name`
+
+## 5. Keys and Constraints
+
+- **Primary Keys**: Each entity has a primary key (`name` for all three entities)
+- **Foreign Keys**: Link junction tables to their parent entities
+- **Composite Keys**: `Represents` and `Vote` use composite primary keys to ensure a congress person cannot represent the same state twice, or vote on the same bill twice
+
+## 6. Data Integrity
+
+- **Entity Integrity**: Primary keys cannot be NULL and must be unique
+- **Referential Integrity**: Foreign keys must reference existing primary keys in the parent table
+- **Domain Integrity**: Data types and constraints ensure valid data values
+
+## 7. Cardinality and Relationships
+
+- **represents**: Since this relationship has attributes (`district`, `since`), it is implemented as a separate junction table. In reality, a congress person represents one state at a time, but the junction table allows for historical tracking if needed.
+- **sponsor**: Many-to-many relationship. A congress person can sponsor many bills, and a bill can have multiple sponsors.
+- **vote**: Many-to-many relationship with attributes. A congress person can vote on many bills, and a bill can be voted on by many congress persons.
+
+---
+
+# Day 4 SQL Script Analysis
+
+The Day 4 SQL script implements the congressional tracking database based on the Class 4 ERD. Below is a detailed breakdown.
+
+## 1. Database and Table Creation
+
+```sql
+Create Database lab_6020;
+USE lab_6020;
+
+Create table State(
+  name varchar(50) PRIMARY KEY,
+  region varchar(50)
+);
+
+Create table CongressPerson(
+  name varchar(100) PRIMARY KEY,
+  party varchar(50)
+);
+
+Create table Bill(
+  name varchar(200) PRIMARY KEY,
+  vote_date date,
+  passed_failed varchar(10)
+);
+```
+
+**Explanation:**
+- State table stores state names and their regions.
+- CongressPerson table stores the names and party affiliations of congress persons.
+- Bill table stores bill names, the date of the vote, and whether the bill passed or failed.
+- Each table uses the name attribute as the primary key, matching the ERD where name is underlined.
+
+## 2. Relationship Tables
+
+```sql
+Create table Represents(
+  state_name varchar(50),
+  person_name varchar(100),
+  district varchar(50),
+  since year,
+  PRIMARY KEY (state_name, person_name),
+  FOREIGN KEY (state_name) REFERENCES State(name),
+  FOREIGN KEY (person_name) REFERENCES CongressPerson(name)
+);
+
+Create table Sponsor(
+  person_name varchar(100),
+  bill_name varchar(200),
+  PRIMARY KEY (person_name, bill_name),
+  FOREIGN KEY (person_name) REFERENCES CongressPerson(name),
+  FOREIGN KEY (bill_name) REFERENCES Bill(name)
+);
+
+Create table Vote(
+  person_name varchar(100),
+  bill_name varchar(200),
+  vote_type varchar(20),
+  vote_date date,
+  PRIMARY KEY (person_name, bill_name),
+  FOREIGN KEY (person_name) REFERENCES CongressPerson(name),
+  FOREIGN KEY (bill_name) REFERENCES Bill(name)
+);
+```
+
+**Explanation:**
+- Represents links Congress persons to States and includes the district and since attributes from the ERD relationship diamond.
+- Sponsor links Congress persons to Bills they sponsored.
+- Vote links Congress persons to Bills with their vote type and vote date.
+- Composite primary keys prevent duplicate entries (e.g., a congress person cannot vote on the same bill twice).
+
+## 3. Inserting Sample Data
+
+```sql
+INSERT INTO State VALUES ('California', 'West');
+INSERT INTO State VALUES ('Texas', 'South');
+INSERT INTO State VALUES ('New York', 'Northeast');
+INSERT INTO State VALUES ('Florida', 'South');
+
+INSERT INTO CongressPerson VALUES ('Nancy Pelosi', 'Democrat');
+INSERT INTO CongressPerson VALUES ('Kevin McCarthy', 'Republican');
+INSERT INTO CongressPerson VALUES ('Alexandria Ocasio-Cortez', 'Democrat');
+INSERT INTO CongressPerson VALUES ('Ted Cruz', 'Republican');
+
+INSERT INTO Bill VALUES ('H.R. 1 - Infrastructure', '2024-01-15', 'Passed');
+INSERT INTO Bill VALUES ('H.R. 2 - Climate Action', '2024-02-20', 'Failed');
+INSERT INTO Bill VALUES ('S. 100 - Tax Reform', '2024-03-10', 'Passed');
+INSERT INTO Bill VALUES ('H.R. 50 - Education', '2024-04-05', 'Passed');
+
+INSERT INTO Represents VALUES ('California', 'Nancy Pelosi', 'CA-12', 1987);
+INSERT INTO Represents VALUES ('New York', 'Alexandria Ocasio-Cortez', 'NY-14', 2019);
+INSERT INTO Represents VALUES ('Texas', 'Kevin McCarthy', 'CA-20', 2007);
+INSERT INTO Represents VALUES ('Texas', 'Ted Cruz', 'TX-1', 2013);
+
+INSERT INTO Sponsor VALUES ('Nancy Pelosi', 'H.R. 1 - Infrastructure');
+INSERT INTO Sponsor VALUES ('Kevin McCarthy', 'H.R. 2 - Climate Action');
+INSERT INTO Sponsor VALUES ('Alexandria Ocasio-Cortez', 'H.R. 2 - Climate Action');
+INSERT INTO Sponsor VALUES ('Ted Cruz', 'S. 100 - Tax Reform');
+
+INSERT INTO Vote VALUES ('Nancy Pelosi', 'H.R. 1 - Infrastructure', 'Yea', '2024-01-15');
+INSERT INTO Vote VALUES ('Kevin McCarthy', 'H.R. 1 - Infrastructure', 'Yea', '2024-01-15');
+INSERT INTO Vote VALUES ('Alexandria Ocasio-Cortez', 'H.R. 1 - Infrastructure', 'Yea', '2024-01-15');
+INSERT INTO Vote VALUES ('Ted Cruz', 'H.R. 1 - Infrastructure', 'Nay', '2024-01-15');
+INSERT INTO Vote VALUES ('Nancy Pelosi', 'H.R. 2 - Climate Action', 'Yea', '2024-02-20');
+INSERT INTO Vote VALUES ('Kevin McCarthy', 'H.R. 2 - Climate Action', 'Nay', '2024-02-20');
+INSERT INTO Vote VALUES ('Alexandria Ocasio-Cortez', 'H.R. 2 - Climate Action', 'Yea', '2024-02-20');
+INSERT INTO Vote VALUES ('Ted Cruz', 'S. 100 - Tax Reform', 'Yea', '2024-03-10');
+```
+
+**Explanation:**
+- Inserts sample data into all six tables.
+- Represents inserts must use valid state and person names that exist in State and CongressPerson tables.
+- Vote inserts must use valid person and bill names.
+- Note: Some Represents entries use different states than expected to show flexibility in the data.
+
+## 4. JOIN Queries Across Multiple Tables
+
+```sql
+SELECT 
+  cp.name AS congress_person,
+  cp.party,
+  s.name AS state,
+  s.region,
+  r.district,
+  r.since
+FROM CongressPerson cp
+JOIN Represents r ON cp.name = r.person_name
+JOIN State s ON r.state_name = s.name;
+```
+
+**Explanation:**
+- This query joins CongressPerson, Represents, and State tables.
+- It returns each congress person's party, state, region, district, and the year they started representing.
+- Demonstrates chaining JOINs across three tables.
+
+## 5. Voting Records Query
+
+```sql
+SELECT 
+  cp.name AS congress_person,
+  cp.party,
+  b.name AS bill,
+  b.vote_date AS bill_vote_date,
+  v.vote_type,
+  v.vote_date AS individual_vote_date
+FROM CongressPerson cp
+JOIN Vote v ON cp.name = v.person_name
+JOIN Bill b ON v.bill_name = b.name
+WHERE v.vote_type = 'Yea'
+ORDER BY b.vote_date DESC;
+```
+
+**Explanation:**
+- This query finds all "Yea" votes with full context.
+- It joins CongressPerson, Vote, and Bill tables.
+- Shows both the bill's overall vote date and the individual's vote date.
+- Demonstrates filtering with WHERE and sorting with ORDER BY.
+
+## 6. Sponsorship Query
+
+```sql
+SELECT 
+  cp.name AS sponsor,
+  cp.party,
+  b.name AS bill,
+  b.passed_failed
+FROM CongressPerson cp
+JOIN Sponsor sp ON cp.name = sp.person_name
+JOIN Bill b ON sp.bill_name = b.name
+WHERE b.passed_failed = 'Passed';
+```
+
+**Explanation:**
+- This query finds bills that passed and their sponsors.
+- Demonstrates joining through the Sponsor relationship table.
+
+## 7. Aggregation: Vote Counts by Party
+
+```sql
+SELECT 
+  cp.party,
+  COUNT(*) AS total_votes,
+  SUM(CASE WHEN v.vote_type = 'Yea' THEN 1 ELSE 0 END) AS yea_votes,
+  SUM(CASE WHEN v.vote_type = 'Nay' THEN 1 ELSE 0 END) AS nay_votes
+FROM CongressPerson cp
+JOIN Vote v ON cp.name = v.person_name
+GROUP BY cp.party;
+```
+
+**Explanation:**
+- This query aggregates votes by political party.
+- Uses conditional aggregation with CASE statements to count Yea and Nay votes.
+- GROUP BY groups results by party.
+- Demonstrates how to pivot data using aggregates.
+
+## 8. Subquery: Congress persons who voted on all bills
+
+```sql
+SELECT name, party
+FROM CongressPerson
+WHERE name NOT IN (
+  SELECT cp.name
+  FROM CongressPerson cp
+  LEFT JOIN Vote v ON cp.name = v.person_name
+  WHERE v.bill_name IS NULL
+);
+```
+
+**Explanation:**
+- The inner query finds congress persons who have NULL votes (didn't vote on some bill).
+- The outer query returns those who are NOT in that list.
+- This finds congress persons who voted on all bills.
+
+## 9. LEFT JOIN: All Congress persons and their votes
+
+```sql
+SELECT 
+  cp.name,
+  cp.party,
+  b.name AS bill,
+  v.vote_type
+FROM CongressPerson cp
+LEFT JOIN Vote v ON cp.name = v.person_name
+LEFT JOIN Bill b ON v.bill_name = b.name;
+```
+
+**Explanation:**
+- This returns all congress persons, even those who haven't voted on any bill.
+- For those without votes, bill and vote_type will be NULL.
+- Demonstrates LEFT JOIN to preserve all rows from the left table.
+
+---
+
+# Day 4 Deep Dive: ERD Design, Relationship Mapping, and Advanced Queries
+
+## 1. ERD to Relational Schema Mapping
+
+When converting an ERD to a relational database, follow these rules:
+
+**Strong Entities:**
+Each entity becomes a table with its attributes as columns. The primary key becomes the PRIMARY KEY constraint.
+
+```sql
+State -> State(name VARCHAR(50) PRIMARY KEY, region VARCHAR(50))
+CongressPerson -> CongressPerson(name VARCHAR(100) PRIMARY KEY, party VARCHAR(50))
+Bill -> Bill(name VARCHAR(200) PRIMARY KEY, vote_date DATE, passed_failed VARCHAR(10))
+```
+
+**Weak Entities:**
+If an entity depends on another for identification, it becomes a table with a foreign key to the owner entity. (Not applicable in this ERD)
+
+**Relationships:**
+- 1:1 or 1:N: Add foreign key to the "many" side table.
+- M:N: Create a junction table with foreign keys to both sides.
+
+```sql
+represents (relationship with attributes): Create Represents table.
+sponsor (M:N): Create Sponsor table.
+vote (M:N with attributes): Create Vote table with vote_type and vote_date.
+```
+
+**Relationship Attributes:**
+Attributes on relationships become columns in the junction table. Example: `district` and `since` become columns in Represents.
+
+## 2. Primary Key Strategies
+
+**Surrogate Keys vs Natural Keys:**
+- **Natural Key**: Uses existing data (e.g., `name`). Good for small datasets and matches the ERD directly.
+- **Surrogate Key**: Uses an auto-incrementing ID (e.g., `state_id INT PRIMARY KEY`). Better for production systems where names might change.
+
+In this ERD, `name` is the natural primary key. In a production system, you might use surrogate keys for better performance and flexibility.
+
+## 3. Many-to-Many Relationships
+
+A many-to-many relationship requires a junction table.
+
+**Example: Congress person and Bill**
+- A congress person can sponsor/vote on many bills.
+- A bill can be sponsored/voted on by many congress persons.
+- Solution: Create Sponsor and Vote tables with composite primary keys.
+- The composite key (`person_name`, `bill_name`) ensures each pair is unique.
+
+## 4. Advanced JOIN Patterns
+
+Chaining JOINs across 3+ tables:
+
+```sql
+SELECT cp.name, s.name, b.name
+FROM CongressPerson cp
+JOIN Represents r ON cp.name = r.person_name
+JOIN State s ON r.state_name = s.name
+JOIN Vote v ON cp.name = v.person_name
+JOIN Bill b ON v.bill_name = b.name;
+```
+
+This chains through Represents and Vote to connect all five tables.
+
+## 5. Aggregation with Multiple Tables
+
+You can aggregate across joined tables:
+
+```sql
+SELECT s.region, COUNT(DISTINCT cp.name) AS congress_count
+FROM State s
+JOIN Represents r ON s.name = r.state_name
+JOIN CongressPerson cp ON r.person_name = cp.name
+GROUP BY s.region;
+```
+
+This counts the number of congress persons per region.
+
+## 6. Subqueries in WHERE vs FROM
+
+**WHERE subquery**: Filters rows based on a condition.
+```sql
+SELECT name FROM CongressPerson 
+WHERE name IN (SELECT person_name FROM Vote WHERE vote_type = 'Yea');
+```
+
+**FROM subquery**: Creates a derived table for further processing.
+```sql
+SELECT region, COUNT(*) AS count
+FROM (
+  SELECT s.region, cp.name
+  FROM State s
+  JOIN Represents r ON s.name = r.state_name
+  JOIN CongressPerson cp ON r.person_name = cp.name
+) AS derived
+GROUP BY region;
+```
