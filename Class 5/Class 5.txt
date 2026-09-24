@@ -1,0 +1,745 @@
+Day 5: Normalization, Anomalies, Functional Dependencies, and Closure
+====================================================================
+
+Today's class covers relational schema design theory. We explain functional
+dependencies, keys and superkeys, prime and non-prime attributes, the normal
+forms (1NF, 2NF, 3NF, and Boyce-Codd Normal Form), the anomalies that bad
+designs cause, how to check whether a functional dependency is violated, and the
+closure algorithm used to find keys.
+
+
+1. Keys and Superkeys
+---------------------
+
+A key is a set of attributes that uniquely identifies a row in a relation.
+Understanding keys is the foundation of functional dependencies and normalization.
+
+- Superkey:
+  A set of attributes whose values are enough to identify a row. A superkey does
+  not have to be minimal, so it may contain extra attributes.
+
+- Candidate Key:
+  A minimal superkey. "Minimal" means removing any attribute from a candidate key
+  leaves a set that is no longer a superkey.
+
+- Primary Key:
+  The candidate key chosen to identify rows. A relation has one primary key.
+
+- Prime Attribute:
+  Any attribute that is part of a candidate key (and therefore part of the
+  primary key when one is chosen).
+
+- Non-prime Attribute:
+  Any attribute that is not part of any candidate key.
+
+Example relational instance: Employees(emp_id, name, email, department)
+
+emp_id name      email               department
+101    Alice     alice@example.com   Sales
+102    Bob       bob@example.com     Engineering
+103    Carol     carol@example.com   Sales
+104    Dan       dan@example.com     HR
+
+Analysis for this relation:
+- {emp_id} is a candidate key because each emp_id value is unique.
+- {email} is also a candidate key because each email value is unique.
+- Superkeys include {emp_id}, {email}, {emp_id, name}, {emp_id, email}, and
+  {emp_id, name, email}. Adding non-key attributes to a candidate key still
+  produces a superkey.
+- Prime attributes are emp_id and email (both belong to candidate keys).
+- Non-prime attributes are name and department.
+- The minimal candidate keys are {emp_id} and {email}. We usually choose
+  {emp_id} as the primary key.
+
+Relational diagram (Employees and Departments):
+
+  Employees                       Departments
+  +-------------------+           +-------------------+
+  | emp_id  (PK)      |<-----+    | department (PK)   |
+  | name              |      |    | head              |
+  | email  (Unique)   |      |    +-------------------+
+  | department (FK)   |------->
+  +-------------------+
+
+Arrows show the foreign-key reference from Employees.department to
+Departments.department.
+
+Key takeaway: A relation can have more than one candidate key. Every attribute
+that appears in any candidate key is prime; everything else is non-prime.
+
+
+2. Functional Dependencies
+--------------------------
+
+A functional dependency (FD) describes a constraint between column sets: if two
+rows share the same values for the attributes on the left, they must also share
+the same values on the right.
+
+Notation: X -> Y means "the attributes in X functionally determine the
+attributes in Y". X is the determinant; Y is the dependent.
+
+Given relation R with attributes A, B, C, D:
+
+- A -> B reads "A determines B". Two rows with the same A value must have the
+  same B value.
+- {A, B} -> C reads "the combination of A and B determines C".
+- A -> A is always true and is called a trivial functional dependency.
+
+Types of functional dependencies:
+- Trivial: Y is a subset of X (for example, A -> A, or {A,B} -> A).
+- Non-trivial: Y is not a subset of X (for example, category -> color).
+- Full: A non-trivial FD where no attribute can be removed from the determinant
+  in a composite key (for example, {name, category} -> price).
+- Partial: A non-trivial functional dependency that depends only on part of a
+  candidate key (for example, category -> color when the key is
+  {name, category}).
+- Transitive: A non-trivial dependency where the determinant is neither a
+  superkey nor a subset of a key (for example, category -> color if color is
+  neither a key nor part of a key).
+
+Design-theory view of an FD: In an ERD/relational design, an arrow from a key
+attribute points to its full row, while an arrow from a non-key attribute points
+to a dependent attribute. If a non-key arrow lands on a candidate key, the design
+already has a key/FD conflict.
+
+Example: Products(name, price, category, color)
+
+{name, category} -> price    (both name and category are needed to know price)
+category            -> color (category alone determines color)
+name                -> price (assumed false in this example: two products with
+                              the same name could have different prices)
+
+Arrow summary for this set of FDs:
+  name, category  --> price
+  category        --> color
+  name            -/-> price   (does not hold)
+
+Key takeaway: A functional dependency is a statement about the real-world
+meaning of the attributes, not just the data you see today. One counter-row can
+violate an FD, but many matching rows never prove it.
+
+
+3. Prime, Non-prime, and Non-trivial Attributes
+-----------------------------------------------
+
+Before the normal forms, three terms you will see repeatedly:
+
+- Prime attribute: an attribute that is part of some candidate key.
+- Non-prime attribute: an attribute that is not part of any candidate key.
+- Non-trivial dependency: a functional dependency X -> Y where Y is not a
+  subset of X. Trivial dependencies (like A -> A) do not cause normalization
+  problems and can be ignored when checking normal forms.
+
+Design-theory view: Draw the relation as boxes, then draw arrows for the
+non-trivial FDs. A candidate key is a minimal set of boxes that can reach every
+other box through arrows. Attributes with an incoming arrow are prime if they
+appear in such a minimal key, and non-prime otherwise.
+
+Example table for Products(name, price, category, color) with FDs
+{name, category} -> price and category -> color:
+
+  name   price  category   color       arrow
+  ----   -----  --------   -----       ----
+  Gizmo  19.99  Gadgets    Silver      category --> color
+  Gizmo  29.99  Gadgets    Silver      name,category --> price
+  Widget 9.99   Tools      Blue
+
+Here category and color are linked by an arrow (category -> color), and the
+composite {name, category} determines price.
+
+Key takeaway: Prime attributes belong to keys; non-prime attributes do not. Only
+non-trivial dependencies matter for the normal forms.
+
+
+4. First Normal Form (1NF)
+--------------------------
+
+A relation is in First Normal Form when every attribute holds atomic (indivisible)
+values. Atomicity means a single cell contains a single value, not a list. There
+must be no repeating groups of columns and no nested lists.
+
+Example of a table that violates 1NF: StudentSchedule(student_id, student_name,
+courses) where the courses column stores multiple values such as
+"Databases, Algorithms". This column is not atomic because one cell holds more
+than one course.
+
+Unnormalized (violates 1NF):
+  student_id student_name courses
+  ----------  ------------- ----------------
+  1           Alice         Databases, Algorithms
+  2           Bob           Networks
+
+Arrow view:
+  student_id --> student_name
+  student_id -/-> courses    (courses is multi-valued, so no single arrow)
+
+To satisfy 1NF, split the multi-valued column into separate rows (or a child
+table). The 1NF version:
+
+StudentSchedule_1NF(student_id, student_name, course)
+  student_id student_name course
+  ----------  ------------- ------------
+  1           Alice         Databases
+  1           Alice         Algorithms
+  2           Bob           Networks
+
+Relational diagram (normalized 1NF design):
++-------------------+   1..n   +--------------------+
+| Student           |-----------| StudentEnrollment   |
+| student_id (PK)   |           | student_id  (PK,FK) |
+| student_name      |           | course_id  (PK,FK)  |
++-------------------+           +--------------------+
+                                     n  |
+                                       |
+                                +--------------------+
+                                | Course             |
+                                | course_id (PK)     |
+                                | course_name        |
+                                +--------------------+
+
+Key takeaway: 1NF forbids multi-valued or nested cells. Once every cell is
+atomic, you meet First Normal Form.
+
+
+5. Second Normal Form (2NF)
+--------------------------
+
+A relation is in Second Normal Form when it is in 1NF and every non-prime
+attribute is fully functionally dependent on the whole of every candidate key.
+In other words, no non-prime attribute may depend on only part of a composite
+candidate key.
+
+Example that violates 2NF: Enrollment(student_id, course_id, student_name,
+grade) with candidate key {student_id, course_id}. The dependency
+student_id -> student_name is partial because student_name depends only on part
+of the composite key (student_id), not on the whole key.
+
+Student partial dependency -> student_name
+Course partial dependency -> course_name
+
+Unnormalized Enrollment (violates 2NF):
+  student_id course_id student_name grade
+  ---------- ----------  ------------- -----
+  1           101         Alice         A
+  1           102         Alice         B
+  2           101         Bob           A
+
+Arrow view:
+  student_id -> student_name   (partial: only part of the key)
+  {student_id, course_id} -> grade  (full key dependency, OK)
+
+To satisfy 2NF, remove the partial dependency into its own table:
+
+Students(student_id, student_name)
+Enrollments(student_id, course_id, grade)
+
+Relational diagram (2NF design):
++-------------------+
+| Student           |
+| student_id (PK)   |
+| student_name      |
++-------------------+
+        1
+        |
++-------------------+
+| Enrollment        |
+| student_id (PK,FK)|
+| course_id (PK,FK) |
+| grade             |
++-------------------+
+        n
+
+Key takeaway: 2NF removes partial dependencies. A relation with a single-attribute
+candidate key is automatically in 2NF; partial dependencies only matter when the
+candidate key has two or more attributes.
+
+
+6. Third Normal Form (3NF)
+--------------------------
+
+A relation is in Third Normal Form when it is in 2NF and no non-prime attribute
+transitively depends on the candidate key. A transitive dependency occurs when
+non-key attribute A determines non-key attribute B through another non-key
+attribute: key -> A and A -> B, so key -> B transitively.
+
+Example that violates 3NF: Orders(order_id, customer_id, customer_name,
+customer_city) with candidate key {order_id}. The dependencies
+customer_id -> customer_name and customer_id -> customer_city are transitive
+because customer_id is not a key, but customer_name and customer_city depend on
+the key only through customer_id.
+
+Transitive dependency arrows:
+  order_id -> customer_id -> customer_name
+  order_id -> customer_id -> customer_city
+
+Orders table (violates 3NF):
+  order_id customer_id customer_name customer_city
+  --------- ----------- -------------- --------------
+  1          501         Alice          Chicago
+  2          501         Alice          Chittagong   (update anomaly waiting to happen)
+  3          502         Bob            Denver
+
+To satisfy 3NF, move the transitively dependent attributes into their own table:
+
+Customers(customer_id, customer_name, customer_city)
+Orders(order_id, customer_id)
+
+Relational diagram (3NF design):
++-------------------+
+| Customer          |
+| customer_id (PK)  |
+| customer_name     |
+| customer_city     |
++-------------------+
+        1
+        |
++-------------------+
+| Order             |
+| order_id (PK)     |
+| customer_id (FK)  |
++-------------------+
+        n
+
+Key takeaway: 3NF removes transitive dependencies. Non-key attributes must
+depend directly on the key, the whole key, and nothing but the key.
+
+
+7. Boyce-Codd Normal Form (BCNF)
+--------------------------------
+
+Boyce-Codd Normal Form strengthens 3NF. A relation is in BCNF when, for every
+non-trivial functional dependency X -> Y, X is a superkey. That means the only
+determinants allowed are candidate keys or superkeys.
+
+Example that violates BCNF (but not 3NF): Courses(course_id, section_id,
+instructor) with functional dependencies
+
+  {course_id, section_id} -> instructor
+  course_id -> instructor
+
+The candidate key is {course_id, section_id}, so course_id is not a superkey. The
+dependency course_id -> instructor therefore violates BCNF.
+
+BCNF violation arrows:
+  course_id -> instructor               (determinant is not a superkey)
+  {course_id, section_id} -> instructor (determinant is the full key)
+
+Courses table (violates BCNF):
+  course_id section_id instructor
+  --------- ----------- -----------
+  C1        S1          Dr. Smith
+  C1        S2          Dr. Smith
+  C2        S1          Dr. Jones
+
+To satisfy BCNF, decompose into:
+
+CourseInstructors(course_id, instructor)        (course_id is the key)
+CourseSections(course_id, section_id)           (composite key)
+
+Relational diagram (BCNF design):
++---------------------+
+| CourseInstructor    |
+| course_id (PK,FK)   |
+| instructor          |
++---------------------+
+        1
+        |
++---------------------+
+| CourseSection       |
+| course_id (PK,FK)   |
+| section_id (PK)     |
++---------------------+
+        n
+
+Key takeaway: BCNF is stricter than 3NF. Whenever a non-key attribute is
+determined by something that is not a superkey, decompose. BCNF sometimes cannot
+preserve every dependency; you must trade dependency preservation for a clean
+design.
+
+
+8. Anomalies
+-------------
+
+Anomalies are data problems that appear when a schema is poorly designed. There
+are three classic anomalies: insertion, update, and deletion.
+
+8.1 Insertion anomaly
+  You cannot insert a row without providing extra, unrelated data.
+
+Example schema: DepartmentEmployee(dept_id, dept_name, employee_id,
+employee_name) with candidate key {dept_id, employee_id}. A department must have
+at least one employee stored in this table before you can insert the department.
+
+DepartmentEmployee (violates):
+  dept_id dept_name employee_id employee_name
+  ------- ---------- ----------- --------------
+  (cannot insert "Research" with dept_id=99 until an employee is added)
+
+Arrow view:
+  dept_id -> dept_name
+  employee_id -> employee_name
+  {dept_id, employee_id} -> employee_name (via employee)
+
+Relational diagram (violates 1NF/2NF and the insertion anomaly):
++-------------------------+
+| DepartmentEmployee      |
+| dept_id (PK)            |
+| dept_name               |
+| employee_id (PK)        |
+| employee_name           |
++-------------------------+
+
+Fixed design:
+Departments(dept_id, dept_name)
+Employees(employee_id, employee_name, dept_id)
+
+Relational diagram (fixed):
++------------------+        1..n +-------------------+
+| Department       |----------| Employee          |
+| dept_id (PK)     |          | employee_id (PK)   |
+| dept_name        |          | employee_name      |
++------------------+          | dept_id (FK)       |
+                              +-------------------+
+
+Key takeaway: When a table mixes two entities (department and employee), you
+cannot add a department with no employees and you cannot add an employee with no
+department.
+
+8.2 Update anomaly
+  The same fact is stored in multiple rows, so changing it in one row but not
+  others creates inconsistency.
+
+Example schema: OrderCustomer(order_id, customer_id, customer_name,
+customer_address) with customer facts duplicated across many orders.
+
+OrderCustomer (violates):
+  order_id customer_id customer_name customer_address
+  --------- ----------- -------------- --------------------
+  1         501         Alice          123 Main St, Chicago
+  2         501         Alice          123 Main Street        (typo, not fixed)
+  3         502         Bob            456 Oak Ave, Denver
+
+Arrow view:
+  customer_id -> customer_name, customer_address
+  order_id -> customer_id, customer_name, customer_address
+
+Relational diagram (violates 3NF):
++----------------------------------+
+| OrderCustomer                    |
+| order_id (PK)                    |
+| customer_id (FK)                 |
+| customer_name                    |
+| customer_address                 |
++----------------------------------+
+
+Fixed design:
+Customers(customer_id, customer_name, customer_address)
+Orders(order_id, customer_id)
+
+Relational diagram (fixed):
++------------------+        1..n +-------------------+
+| Customer         |----------| Order             |
+| customer_id (PK) |          | order_id (PK)      |
+| customer_name    |          | customer_id (FK)   |
+| customer_address |          +-------------------+
++------------------+
+
+Key takeaway: Duplicated facts must be stored once. Updating a customer's address
+should touch one row, not every order that customer placed.
+
+8.3 Deletion anomaly
+  Deleting a row unintentionally removes a fact that should be preserved.
+
+Example schema: StudentEnrollment(student_id, student_name, course_id,
+course_name) with candidate key {student_id, course_id}. Deleting a student's
+last enrollment erases the student entirely.
+
+StudentEnrollment (violates):
+  student_id student_name course_id course_name
+  ---------- ------------- --------- ------------
+  1           Alice        101       Databases
+  2           Bob          102       Networks
+  (deleting Bob's only row deletes Bob's record even if Alice still needs it)
+
+Arrow view:
+  student_id -> student_name
+  course_id -> course_name
+  {student_id, course_id} -> course_name
+
+Relational diagram (violates 2NF/3NF):
++----------------------------------+
+| StudentEnrollment                |
+| student_id (PK)                  |
+| student_name                     |
+| course_id (PK)                   |
+| course_name                      |
++----------------------------------+
+
+Fixed design:
+Students(student_id, student_name)
+Courses(course_id, course_name)
+Enrollments(student_id, course_id)
+
+Relational diagram (fixed):
++-------------------+   1..n   +-------------------+
+| Student           |----------| Enrollment        |
+| student_id (PK)   |          | student_id (PK,FK)|
+| student_name      |          | course_id (PK,FK) |
++-------------------+          +-------------------+
+        n                            n
+        |                            |
+        | 1..n                  1..n |
++-------------------+          +-------------------+
+| Course            |          | (join table)      |
+| course_id (PK)    |          +-------------------+
+| course_name       |
++-------------------+
+
+Key takeaway: Removing the last enrollment for a student or course should not
+erase the student or course itself. Keep students and courses in separate tables.
+
+
+9. Relational Schema Design
+---------------------------
+
+Relational schema design turns a set of requirements into tables. The standard
+steps are:
+
+1. Identify the entities and attributes from the requirements.
+2. Identify the candidate keys and functional dependencies for each entity.
+3. Draw a conceptual diagram (ERD) showing entities and relationships.
+4. Convert the ERD to a relational schema: entities become tables, relationships
+   become foreign keys or junction tables.
+5. Apply functional dependencies to choose good primary keys.
+6. Normalize: check 1NF, 2NF, 3NF, and BCNF, then decompose any violations.
+7. Add integrity constraints: primary keys, foreign keys, UNIQUE, NOT NULL, and
+   CHECK constraints.
+8. Verify lossless join and (when possible) dependency preservation after each
+   decomposition.
+
+Example walkthrough: A university wants to track students, courses, instructors,
+and which students take which course in which term.
+
+Step 1-2: Entities and dependencies:
+  Students(student_id, student_name, email)        student_id -> student_name
+                                                  email -> student_name
+                                                  student_id -> email
+  Courses(course_id, course_name, instructor_id)   course_id -> course_name
+                                                  course_id -> instructor_id
+  Enrollments(student_id, course_id, term, grade)  {student_id, course_id, term} -> grade
+
+Step 3-4 conceptual/relational diagram:
++-------------------+        1..n +-------------------------+
+| Student           |----------| Enrollment              |
+| student_id (PK)   |          | student_id (PK, FK)      |
+| student_name      |          | course_id (PK, FK)       |
+| email             |          | term (PK)                |
++-------------------+          | grade                    |
+                               +-------------------------+
+        n                            n
+        | 1..n                1..n |
++-------------------+          +-------------------------+
+| Course            |          | Instructor              |
+| course_id (PK)    |<---------| instructor_id (PK)      |
+| course_name       |    1..n  | instructor_name          |
++-------------------+          +-------------------------+
+
+Step 5-6: Enrollments uses the composite key {student_id, course_id, term}.
+Courses is in BCNF because course_id is a candidate key. No transitive or partial
+dependencies remain. Students is in BCNF because student_id and email are both
+candidate keys.
+
+Key takeaway: Good schema design starts with entities and functional
+dependencies, not with tables. Normalization is a later cleanup step, not a
+replacement for understanding the data.
+
+
+10. Why We Care About Functional Dependencies
+---------------------------------------------
+
+Functional dependencies matter because they describe the real-world constraints
+that the data must obey. If you ignore them, you pay for it later.
+
+- They define keys. A candidate key is a minimal set of attributes whose closure
+  includes every other attribute.
+- They reveal redundancy. If A -> B, storing B separately from A duplicates
+  information.
+- They cause anomalies. An insertion anomaly happens when you cannot add A
+  without also adding B, even if you do not yet know B.
+- They guide normalization. Partial and transitive dependencies are just broken
+  functional dependencies.
+- They are constraints. A functional dependency is a constraint on allowed
+  relation instances, just like PRIMARY KEY or UNIQUE.
+
+Because a functional dependency is a constraint, you can check whether an
+instance violates it. What you cannot do from an instance is prove that an FD
+will always hold; you can only fail it, never fully verify it.
+
+Example: If employee_id -> department is a declared constraint, every row with
+the same employee_id must show the same department. Finding two rows with the
+same employee_id but different departments is a violation.
+
+Key takeaway: Functional dependencies are constraints. Use them to find keys, and
+use keys and normal forms to avoid anomalies.
+
+
+11. Checking Functional Dependency Violations
+--------------------------------------------
+
+Two important facts:
+
+- A single counter-example can prove an FD is violated in an instance.
+- A sample instance can never prove that an FD always holds. The schema may be
+  fine, or the instance may simply look consistent by accident.
+
+Example A: A constraint that holds in this data.
+Relation R(A, B, C) with instance:
+
+  A B C
+  - - -
+  1 1 1
+  2 1 1
+  3 2 2
+
+FD A -> B appears to hold here because each A maps to one B. But that is not a
+proof: a fourth row (A=1, B=2) would violate it.
+
+Example B: A constraint that does not hold in this data.
+Using the same relation R(A, B, C):
+
+FD B -> A does not hold, because B=1 maps to both A=1 and A=2:
+
+  A B C
+  - - -
+  1 1 1
+  2 1 1
+  (B=1 determines A=1 in row 1, but A=2 in row 2)
+
+Example C: A violated functional dependency in a 7-column/7-row table.
+Relation R(a, b, c, d, e, f, g). The dependency a -> b is violated because a=1
+maps to both b=5 and b=8:
+
+  a b c d e f g
+  - - - - - - -
+  1 5 7 3 6 3 1
+  1 8 7 4 6 3 2
+  2 4 9 3 7 5 3
+  2 4 9 8 7 5 4
+  3 2 6 1 8 2 5
+  4 1 8 5 9 4 6
+  5 9 1 6 1 6 7
+
+Arrow summary for the table above:
+  a    -/-> b   (violated: a=1 has b=5 and b=8)
+  c    -/-> d   (also violated: c=7 has d=3 and d=4)
+  category -/-> price (declared FD, not present in this table; only a->b is claimed here)
+
+Key takeaway: One row that breaks the FD is enough to flag a violation. Seeing
+many matching rows is not enough to declare the FD safe forever.
+
+
+12. Finding Functional Dependencies
+----------------------------------
+
+Finding functional dependencies means deciding which FDs a relation should
+declare. Use the real-world meaning first, then use data to check.
+
+- Use the semantics: "A customer's address is determined by the customer ID, not
+  by the order ID."
+- Use declared constraints: PRIMARY KEY, UNIQUE, and CHECK definitions give you
+  FDs for free.
+- Use the candidate keys: a candidate key determines every other attribute.
+- Use data inspection: group rows by the determinant and confirm the dependent
+  is constant per group. If it is not constant, the FD is violated.
+- Never use a sample to prove an FD. A sample can only disprove.
+
+Example: For relation Orders(order_id, customer_id, order_date, customer_name,
+customer_city), the real-world meaning gives:
+
+  order_id -> customer_id, order_date, customer_name, customer_city
+  customer_id -> customer_name, customer_address
+
+The second FD is transitive through customer_id. Finding it is what leads to 3NF
+decomposition.
+
+Relational diagram after finding the FDs and decomposing:
++------------------+        1..n +-------------------------+
+| Customer         |----------| Order                     |
+| customer_id (PK) |          | order_id (PK)             |
+| customer_name    |          | customer_id (FK)          |
+| customer_city    |          | order_date                |
++------------------+          +-------------------------+
+
+Key takeaway: Always start from meaning and keys. Use data only to catch
+violations, never to certify dependencies.
+
+13. Closure Algorithm
+---------------------
+
+The closure of a set of attributes X, written X+, is the set of all attributes
+functionally determined by X under a given set of FDs. Computing closures is how
+you test for candidate keys and superkeys.
+
+Closure algorithm:
+  1. Set result := X.
+  2. For each FD Y -> Z, if Y is contained in result, add Z to result.
+  3. Repeat step 2 until result stops growing.
+  4. The final result is X+.
+
+Example: Products(name, price, category, color) with FDs
+
+  {name, category} -> price
+  category -> color
+
+Compute the closure of each single attribute and each candidate-key subset:
+
+  Attribute set        Closure
+  ------------------    ---------------------------
+  {name}               name
+  {price}              price
+  {category}           category, color
+  {color}              color
+  {name, price}        name, price
+  {name, category}     name, price, category, color   (all attributes)
+  {name, color}        name, color
+  {price, category}    price, category, color
+  {price, color}       price, color
+  {category, color}    category, color
+  {name, price, category}  name, price, category, color (all)
+  {name, price, color}    name, price, color
+  {name, category, color} name, price, category, color (all)
+  {price, category, color} price, category, color
+  {name, price, category, color} all attributes
+
+Because {name, category}+ = {name, price, category, color}, {name, category} is a
+candidate key. No smaller subset determines all attributes, so it is minimal.
+
+Arrow summary re-stated as closures:
+  name      --> (no new attributes; name+ = name)
+  category  --> color   (category+ = category, color)
+  name,category --> price   ({name, category}+ = all attributes)
+
+Key takeaway: Closures identify candidate keys. A set is a candidate key exactly
+when its closure equals the whole attribute set and it is minimal.
+
+14. Key takeaway
+----------------
+- Functional dependencies are constraints, and they must be reasoned from the
+  meaning, not from samples.
+- Keys and closures go hand in hand: close an attribute set to find keys.
+- Prime attributes belong to keys; non-prime attributes do not.
+- 1NF fixes multi-values, 2NF fixes partial key dependencies, 3NF fixes
+  transitive dependencies, and BCNF fixes non-superkey determinants.
+- Inserting, updating, or deleting a row should never erase or contradict facts.
+  If it can, decompose the table.
+- A single counter-example proves an FD is violated; no amount of matching rows
+  proves it is safe.
+
+
+
+
+
+
+
+
+
