@@ -75,68 +75,40 @@ To make an LLM act as a reliable query optimizer, your prompts enforce strict co
 
 ## Project Plan: LLM SQL Query Nesting and Unnesting Optimization
 
+**The Idea:** To automate through OpenAI a query optimization pipeline that uses the OpenAI API to rewrite inefficient subqueries (aka. queries that are nested) into equivalent queries using standard joins (aka. a query that is unnested).
+
+- Performance validation will be benchmarked against JOBS (Join Order Benchmark) standard join order datasets to measure latency and improve efficiency of the queries.
+
+### Objectives
+
+- Develop a programmatic interface using the OpenAI API to analyze, unnest, and optimize complex SQL queries.
+- Establish a benchmarking framework utilizing standard join order benchmarks (such as Join Order Benchmark / JOB) to evaluate execution costs.
+- Compare LLM-rewritten query plans against native database optimizer plans (PostgreSQL).
+- Track success metrics including execution time reduction, join cost estimation, and syntactic correctness.
+
+### Technical Stack
+
+- **Language:** Python (strict typing, type hints, functional patterns).
+- **AI Integration:** OpenAI API (utilizing structured outputs for robust SQL parsing and rewriting).
+- **Database:** PostgreSQL runs locally or in a containerized test environment.
+- **Benchmark:** Join Order Benchmark (IMDb dataset) derived subquery workloads.
+- **Testing:** Pytest with automated unit and integration tests, strict linting and type checking.
+
 ### TODO
 
-**Part 1: LLM Prompt Engineering and Rewriting Pipeline**
+#### Part 1: LLM Prompt Engineering and Rewriting Pipeline
 
-- [x] Write system prompts for unnesting dependent joins into explicit joins with pre-aggregation
-- [x] Add syntax and semantic validation before database execution
+- Design system prompts enforcing strict relational algebra rules for query unnesting (converting dependent joins to explicit inner/left joins with pre-aggregation).
+- Build automated syntax and semantic validation steps before executing queries against the database.
 
-**Part 2: Benchmarking**
+#### Part 2: Benchmarking
 
-- [ ] Run original and LLM-generated queries against the benchmark database
-- [ ] Collect execution time and memory metrics
-- [ ] Log results
+- Create automated test scripts that run both original and LLM generated queries against the benchmark database.
+- Collect execution time and memory consumption metrics.
+- Log results.
 
-**Part 3: Find the Stats**
+#### Part 3: Find the Stats
 
-- [ ] Correctness rate
-- [ ] Performance speedup
-- [ ] Cost efficiency
-
-## Benchmarking the Two Query Forms
-
-`benchmark_queries.py` runs every query in `nested_queries.sql` and its generated partner in
-`unnested_queries.sql` against the same database and reports which structure is cheaper.
-
-### Metrics
-
-| Metric | Source | Meaning |
-|---|---|---|
-| Execution time | `Execution Time` from the plan | Server-side cost, excluding result transfer |
-| Buffers | `Shared Hit Blocks` + `Shared Read Blocks` | I/O and cache traffic |
-| Rescans | largest `Actual Loops` in the plan | Above 1 signals a surviving dependent join |
-
-Timing is taken from the server rather than the client, so transferring a large result set does not
-distort the comparison. The first of `--runs` executions is discarded as cache warm-up and the
-median of the rest is reported.
-
-### Running
-
-```bash
-pip install -r requirements.txt
-
-# once, to point at your local copy of the IMDb database:
-# add DATABASE_URL to .env, or pass --dsn
-
-python benchmark_queries.py
-python benchmark_queries.py --runs 10
-```
-
-The IMDb dump (`imdb.sql`) uses MySQL syntax; load it into PostgreSQL with the `USE imdb;`,
-`SET FOREIGN_KEY_CHECKS=0;` and `START TRANSACTION;` lines removed.
-
-### Reading the output
-
-```
-QID    nested ms  unnested ms  speedup   buffers n/u  u.loops
-Q01        240.0         16.0   15.00x       220/220        1
-Q11            -            -        -             -        -  relation "movie_directors" does not exist
-
-15 queries | unnested faster: 11 | errors: 2 | 5 runs each
-```
-
-`speedup` is nested time divided by unnested time, so above `1.00x` means the rewrite won.
-`u.loops` is the dependent-join signal: a correctly unnested plan scans each side once. A row
-reporting an error failed at the database, which is itself a finding — several generated rewrites
-reference tables or columns that do not exist in the schema.
+- **Correctness Rate:** Percentage of LLM-rewritten queries that execute successfully and return semantically equivalent results.
+- **Performance Speedup:** Reduction in execution time compared to unoptimized nested execution plans.
+- **Cost Efficiency:** Lower query plan costs reported by the database query planner.
