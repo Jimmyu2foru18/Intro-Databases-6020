@@ -1,18 +1,23 @@
+import os
 import re
 import sys
 import time
 from pathlib import Path
+
+import prompts
+import validate_sql
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from google.genai.errors import APIError
+from google.genai.errors import APIError, ClientError
 
 load_dotenv()
 
-SYSTEM_PROMPT = """Rewrite this SQL query by replacing all correlated subqueries with standard joins, CTEs, and pre-aggregations.
-Return ONLY the SQL code. Do not include markdown code blocks or explanations.
-The output must return identical rows in identical order using PostgreSQL syntax."""
-
+DIR = Path(__file__).resolve().parent
+MODEL, ATTEMPTS = os.getenv("GEMINI_MODEL", "gemini-3.8-flash"), 3
+PAUSE = int(os.getenv("GEMINI_PAUSE", "13"))  # free tier allows 5 requests a minute
+FENCE = re.compile(r"^```(?:sql)?|\s*```$", re.MULTILINE)
+COMPLETED = re.compile(r"^-- (Q\d+) \(unnested\)", re.MULTILINE)
 HEADER = "-- Unnested query catalog\n-- Generated via Gemini API\n\n"
 
 
@@ -42,63 +47,72 @@ def parse_queries(src: Path) -> list[tuple[str, str, str]]:
 
 
 def get_completed_ids(dst: Path) -> set[str]:
+    """Ids already written as a real rewrite. Rejected queries stay eligible for a retry."""
     if not dst.exists():
         dst.write_text(HEADER, encoding="utf-8")
         return set()
+    return set(COMPLETED.findall(dst.read_text(encoding="utf-8")))
 
-    content = dst.read_text(encoding="utf-8")
-    return set(re.findall(r"^-- (Q\d+)", content, re.MULTILINE))
+
+def generate(client, prompt, attempt):
+    """One call to the model, retrying the transient quota and overload errors."""
+    for pause in (0, 15, 30, 60):
+        if pause:
+            time.sleep(pause)
+        try:
+            return client.models.generate_content(
+                model=MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(system_instruction=prompts.RULES, temperature=0.4 * attempt),
+            ).text
+        except (APIError, ClientError) as err:
+            last = err
+    raise last
+
+
+def rewrite(client, schema, schema_ddl, sql):
+    """Generate a rewrite and keep repairing it until the schema accepts it."""
+    prompt = prompts.SYSTEM_PROMPT.format(schema=schema_ddl, sql=sql)
+    for attempt in range(ATTEMPTS):
+        candidate = FENCE.sub("", generate(client, prompt, attempt)).strip()
+        problems = validate_sql.validate(candidate, schema)
+        if not problems:
+            return candidate
+        print(f"  attempt {attempt + 1} rejected: {problems[0]}")
+        prompt = prompts.SYSTEM_PROMPT.format(schema=schema_ddl, sql=sql) + prompts.REPAIR_PROMPT.format(
+            problems="\n".join(f"- {p}" for p in problems), rejected=candidate
+        )
+    return None
 
 
 def main():
-    src = Path("nested_queries.sql")
-    dst = Path("unnested_queries.sql")
-
+    src, dst = DIR / "nested_queries.sql", DIR / "unnested_queries.sql"
     if not src.exists():
         sys.exit(f"Error: File not found: {src}")
 
-    queries = parse_queries(src)
+    schema = validate_sql.load_schema(ddl_path=DIR / "imdb.sql", dsn=os.getenv("DATABASE_URL"))
+    ddl = validate_sql.render_schema(schema)
     completed = get_completed_ids(dst)
     client = genai.Client()
 
-    for qid, desc, sql in queries:
+    for qid, desc, sql in parse_queries(src):
         if qid in completed:
             continue
-
         print(f"Processing {qid}...")
-        prompt = f"Query {qid}: {desc}\n\nSQL:\n{sql}"
-        success = False
-
-        for attempt in range(5):
-            try:
-                resp = client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=SYSTEM_PROMPT,
-                        temperature=0.0,
-                    ),
-                )
-
-                sql_out = resp.text.strip()
-                block = f"-- {qid} (unnested): {desc}\n{sql_out}\n\n"
-
-                with dst.open("a", encoding="utf-8") as f:
-                    f.write(block)
-
-                success = True
-                break
-
-            except APIError as err:
-                print(f"  Attempt {attempt + 1} failed ({err.code}): retrying in 30s")
-                time.sleep(30)
-
-        if not success:
-            print(f"  Failed to process {qid}")
-            error_block = f"-- {qid} (unnested): {desc}\n-- ERROR: Unnesting failed.\n\n"
+        try:
+            rewritten = rewrite(client, schema, ddl, sql)
+        except (APIError, ClientError) as err:
+            print(f"  API error, skipping: {err}")
+            continue
+        if rewritten:
             with dst.open("a", encoding="utf-8") as f:
-                f.write(error_block)
+                f.write(f"-- {qid} (unnested): {desc}\n{rewritten}\n\n")
+        else:
+            print(f"  still invalid after {ATTEMPTS} attempts, will retry next run")
+        time.sleep(PAUSE)
 
 
 if __name__ == "__main__":
+    if "--force" in sys.argv:
+        (DIR / "unnested_queries.sql").unlink(missing_ok=True)
     main()
