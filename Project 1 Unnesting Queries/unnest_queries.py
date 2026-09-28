@@ -1,134 +1,104 @@
+import re
+import sys
+import time
 from pathlib import Path
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from dotenv import load_dotenv
-import time
-from google.genai.errors import ServerError, ClientError
+from google.genai.errors import APIError
 
 load_dotenv()
 
-SYSTEM = """Rewrite this SQL query by replacing all correlated subqueries with
-standard joins, CTEs, and pre-aggregations. Return ONLY the SQL code, no
-explanations, no markdown fences. The result must return the same rows
-in the same order. Use PostgreSQL-compatible syntax."""
+SYSTEM_PROMPT = """Rewrite this SQL query by replacing all correlated subqueries with standard joins, CTEs, and pre-aggregations.
+Return ONLY the SQL code. Do not include markdown code blocks or explanations.
+The output must return identical rows in identical order using PostgreSQL syntax."""
 
-HEADER = """-- Unnested (join-based) query catalog for IMDb schema
--- Generated via Gemini API as equivalents of nested_queries.sql.
---
+HEADER = "-- Unnested query catalog\n-- Generated via Gemini API\n\n"
 
-"""
 
-def parse(path: Path) -> list[tuple[str, str, str]]:
-    text = path.read_text()
-    out = []
-    current_qid = None
-    current_desc = None
-    sql_lines = []
+def parse_queries(src: Path) -> list[tuple[str, str, str]]:
+    text = src.read_text(encoding="utf-8")
+    queries = []
+    qid, desc, sql_lines = None, "", []
 
     for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("-- Q") and stripped[4:6].isdigit():
-            if current_qid and sql_lines:
-                out.append((current_qid, current_desc, "\n".join(sql_lines).strip()))
-                sql_lines = []
-            
-            header_part = stripped[3:]
-            if ":" in header_part:
-                current_qid, current_desc = header_part.split(":", 1)
-                current_qid = current_qid.strip()
-                current_desc = current_desc.strip()
-            else:
-                current_qid = header_part.strip()
-                current_desc = ""
-        elif current_qid is not None:
-            sql_lines.append(line)
-            if stripped.endswith(";"):
-                out.append((current_qid, current_desc, "\n".join(sql_lines).strip()))
-                current_qid = None
-                current_desc = None
+        if line.startswith("-- Q"):
+            if qid and sql_lines:
+                queries.append((qid, desc, "\n".join(sql_lines).strip()))
                 sql_lines = []
 
-    return out
+            header = line.strip()[3:]
+            if ":" in header:
+                qid, desc = map(str.strip, header.split(":", 1))
+            else:
+                qid, desc = header.strip(), ""
+        elif qid:
+            sql_lines.append(line)
+            if line.strip().endswith(";"):
+                queries.append((qid, desc, "\n".join(sql_lines).strip()))
+                qid, desc, sql_lines = None, "", []
+
+    return queries
+
+
+def get_completed_ids(dst: Path) -> set[str]:
+    if not dst.exists():
+        dst.write_text(HEADER, encoding="utf-8")
+        return set()
+
+    content = dst.read_text(encoding="utf-8")
+    return set(re.findall(r"^-- (Q\d+)", content, re.MULTILINE))
+
 
 def main():
-    print("Starting script...")
+    src = Path("nested_queries.sql")
+    dst = Path("unnested_queries.sql")
+
+    if not src.exists():
+        sys.exit(f"Error: File not found: {src}")
+
+    queries = parse_queries(src)
+    completed = get_completed_ids(dst)
     client = genai.Client()
-    
-    input_path = Path("nested_queries.sql")
-    if not input_path.exists():
-        print(f"Error: {input_path} not found in the current directory.")
-        return
 
-    queries = parse(input_path)
-    print(f"Found {len(queries)} queries in nested_queries.sql.")
-    
-    output_path = Path("unnested_queries.sql")
-    completed_ids = set()
-    
-    if output_path.exists():
-        out_text = output_path.read_text()
-        for line in out_text.splitlines():
-            if line.startswith("-- Q") and "(unnested)" in line:
-                tokens = line.split()
-                if len(tokens) > 1:
-                    completed_ids.add(tokens[1])
-    else:
-        output_path.write_text(HEADER)
-        print("unnested_queries.sql initialized.")
-
-    remaining_queries = []
     for qid, desc, sql in queries:
-        normalized_id = f"Q{int(qid.lstrip('Q'))}"
-        if qid not in completed_ids and normalized_id not in completed_ids:
-            remaining_queries.append((qid, desc, sql))
-        else:
-            print(f"  Skipping {qid} (already completed)")
+        if qid in completed:
+            continue
 
-    highest_completed = max([int(q.lstrip('Q')) for q in completed_ids]) if completed_ids else 0
-    if highest_completed > 0:
-        print(f"unnested_queries.sql completed up till Q{highest_completed:02d}, starting at Q{highest_completed + 1:02d} and onwards.")
-    else:
-        print("Starting fresh processing from Q01.")
-
-    print(f"Remaining queries to process: {len(remaining_queries)}")
-
-    for qid, desc, sql in remaining_queries:
-        print(f"  {qid} -> unnesting...")
+        print(f"Processing {qid}...")
         prompt = f"Query {qid}: {desc}\n\nSQL:\n{sql}"
-        
+        success = False
+
         for attempt in range(5):
             try:
                 resp = client.models.generate_content(
-                    model="gemini-3.1-flash-lite",
+                    model="gemini-2.5-flash",
                     contents=prompt,
                     config=types.GenerateContentConfig(
-                        system_instruction=SYSTEM,
+                        system_instruction=SYSTEM_PROMPT,
                         temperature=0.0,
-                        max_output_tokens=4096,
-                    )
+                    ),
                 )
-                result = resp.text.strip()
-                block = f"-- Q{qid[1:]} (unnested): {desc}\n{result}\n\n"
-                with output_path.open("a", encoding="utf-8") as f:
-                    f.write(block)
-                print(f"  {qid} completed successfully.")
-                break
-            except (ServerError, ClientError) as e:
-                wait_time = 30
-                if isinstance(e, ClientError) and getattr(e, 'code', None) == 429:
-                    print(f"  Rate limit hit (Quota exceeded). Waiting 30 seconds before retry...")
-                else:
-                    print(f"  Server busy or error, retrying in {wait_time} seconds...")
-                
-                if attempt < 4:
-                    time.sleep(wait_time)
-                else:
-                    print(f"  Skipping {qid} due to persistent errors.")
-                    error_block = f"-- Q{qid[1:]} (unnested): {desc}\n-- ERROR: Failed due to rate limit or server error.\n\n"
-                    with output_path.open("a", encoding="utf-8") as f:
-                        f.write(error_block)
 
-    print("Processing complete. All results saved to unnested_queries.sql")
+                sql_out = resp.text.strip()
+                block = f"-- {qid} (unnested): {desc}\n{sql_out}\n\n"
+
+                with dst.open("a", encoding="utf-8") as f:
+                    f.write(block)
+
+                success = True
+                break
+
+            except APIError as err:
+                print(f"  Attempt {attempt + 1} failed ({err.code}): retrying in 30s")
+                time.sleep(30)
+
+        if not success:
+            print(f"  Failed to process {qid}")
+            error_block = f"-- {qid} (unnested): {desc}\n-- ERROR: Unnesting failed.\n\n"
+            with dst.open("a", encoding="utf-8") as f:
+                f.write(error_block)
+
 
 if __name__ == "__main__":
     main()
