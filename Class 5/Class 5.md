@@ -903,14 +903,3 @@ name            --> (no new attributes; name+ = name)
 category        --> color        (category+ = category, color)
 name,category   --> price        ({name, category}+ = all attributes)
 ```
-
-> **Key takeaway:** Closures identify candidate keys. A set is a candidate key exactly when its closure equals the whole attribute set and it is minimal.
-
-## 14. Key takeaway
-
-- Functional dependencies are constraints, and they must be reasoned from the meaning, not from samples.
-- Keys and closures go hand in hand: close an attribute set to find keys.
-- Prime attributes belong to keys; non-prime attributes do not.
-- 1NF fixes multi-values, 2NF fixes partial key dependencies, 3NF fixes transitive dependencies, and BCNF fixes non-superkey determinants.
-- Inserting, updating, or deleting a row should never erase or contradict facts. If it can, decompose the table.
-- A single counter-example proves an FD is violated; no amount of matching rows proves it is safe.
