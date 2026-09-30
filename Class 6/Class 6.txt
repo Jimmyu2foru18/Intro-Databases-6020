@@ -1,0 +1,925 @@
+RELATIONAL ALGEBRA — LECTURE NOTES
+===================================
+
+Relational algebra is a procedural, mathematical query language for relations.
+It defines a set of operators that each take one or more relations as input and
+produce a single relation as output. This closure property (every operator
+returns a relation) lets you compose operators — the result of one feeds into
+the next. The core operators are:
+
+  - Selection (sigma, σ)  — filter rows
+  - Projection (pi, π)     — select columns, remove duplicates
+  - Cross product (×)      — pair every tuple with every tuple
+  - Renaming (rho, ρ)      — change relation or attribute names
+  - Natural join (⋈)       — join on shared attribute names
+
+Every other relational operator (union, difference, intersection, division,
+assignment) can be derived from combinations of these five.
+
+
+1. SELECTION (SIGMA, σ)
+------------------------
+
+Definition:
+  Selection filters rows. It returns only the tuples (rows) of a relation for
+  which a given predicate (condition) is true. Selection does NOT change the
+  schema — every returned row has all the original columns. Selection also
+  preserves duplicates: each matching tuple is kept exactly as it appears.
+
+Notation:
+  σ_condition(R)
+  Read as: "the tuples of R for which condition is true."
+
+Example — Employees(ssn, name, salary):
+
+  ssn      name      salary
+  -------- --------- --------
+  111-22   Alice     68000
+  222-33   Bob       72000
+  333-44   Carol     68000
+  444-55   Dan       54000
+
+  Query: find employees earning more than 65000.
+  Relational algebra:  σ_salary > 65000(Employees)
+  SQL equivalent:      SELECT * FROM Employees WHERE salary > 65000;
+
+  Result (full schema retained; only matching rows; duplicates kept):
+
+  ssn      name      salary
+  -------- --------- --------
+  111-22   Alice     68000
+  222-33   Bob       72000
+  333-44   Carol     68000
+
+
+2. PROJECTION (PI, π)
+----------------------
+
+Definition:
+  Projection selects specific columns (attributes) and discards the rest. It
+  operates on columns, not rows. Two key behaviors distinguish it from
+  selection:
+  (a) It eliminates columns — the output schema contains only the listed
+      attributes.
+  (b) It removes duplicates — because the result is a relation (set of tuples),
+      duplicate rows after projection are collapsed into one.
+
+Notation:
+  π_attribute-list(R)
+  Read as: "the values of the listed attributes from R."
+
+Example — Employees(ssn, name, salary):
+
+  ssn      name      salary
+  -------- --------- --------
+  111-22   Alice     68000
+  222-33   Bob       72000
+  333-44   Carol     68000
+  444-55   Alice     54000
+
+  Query: list only name and salary.
+  Relational algebra:  π_name, salary(Employees)
+  SQL equivalent:      SELECT name, salary FROM Employees;
+
+  Step-by-step:
+    1. Extract name and salary from each row.
+    2. Remove duplicate tuples.
+
+  Result (the two Alice rows have different salaries, so they are distinct
+  tuples and both survive):
+
+  name      salary
+  --------- --------
+  Alice     68000
+  Bob       72000
+  Carol     68000
+  Alice     54000
+
+  Now project just salary:
+  π_salary(Employees)  →  3 distinct values: 68000, 72000, 54000
+
+
+3. COMPOSITIONAL OPERATORS
+---------------------------
+
+What "compositional" means:
+  Relational algebra operators are compositional — the output of one operator
+  can be used directly as the input to another. Because every operator returns
+  a relation, you can nest expressions to express multi-step queries.
+
+Example — Students(sid, name, gpa):
+
+  sid  name      gpa
+  ---- --------- ----
+  1    Alice     3.7
+  2    Bob       3.2
+  3    Carol     3.9
+  4    Dan       2.8
+
+  Query: find the names of students with GPA above 3.5.
+  Two steps: filter (selection), then pick a column (projection).
+
+  Relational algebra (nested, read inside-out):
+  π_name(σ_gpa > 3.5(Students))
+
+  SQL equivalent:
+  SELECT name FROM Students WHERE gpa > 3.5;
+
+  Result:
+  name
+  ---------
+  Alice
+  Carol
+
+How to represent in relational algebra:
+  Write nested expressions. The innermost operator is applied first, then its
+  output is fed to the outer operator. You can also use the assignment operator
+  (←) to name intermediate results:
+    temp ← σ_gpa > 3.5(Students)
+    Result ← π_name(temp)
+
+What is the difference: projection then sigma vs sigma then projection?
+  - σ then π (selection first, then projection): ALWAYS safe. You filter on
+    all columns, then drop what you don't need. All attributes needed by the
+    condition are still available.
+  - π then σ (projection first, then selection): SAFE ONLY if π keeps every
+    attribute that σ references. If π drops a column the selection needs,
+    the expression is invalid.
+
+  Example: students above 3.5 GPA showing name and gpa.
+    π_name,gpa(σ_gpa > 3.5(Students))  — safe and correct.
+    σ_gpa > 3.5(π_name(Students))      — INVALID, because π_name drops gpa.
+
+  When both orders are valid (projection keeps all condition attributes), the
+  final result is the same — only intermediate duplicates differ.
+
+
+4. CROSS PRODUCT (×)
+---------------------
+
+Definition:
+  The cross product (Cartesian product) pairs every tuple in the first
+  relation with every tuple in the second. If R has m rows and S has n rows,
+  the result has m × n rows.
+
+Notation: R × S
+
+  - The result schema is the concatenation of both schemas.
+  - If both relations have attributes with the same name, the result
+    disambiguates them (e.g., by prefixing with the relation name).
+  - Cross products are RARE in practice because they pair everything with
+    everything, ignoring meaning. They are mainly a building block for joins.
+
+Example:
+
+  SSNs(ssn, name, address):
+  ssn      name      address
+  -------- --------- ----------------
+  111-22   Alice     123 Main St
+  222-33   Bob       456 Oak Ave
+
+  Enrollments(sid, pname, gpa):
+  sid  pname   gpa
+  ---- ------- ----
+  1    Alice   3.7
+  2    Bob     3.2
+
+  SSNs × Enrollments (2 × 2 = 4 rows):
+  ssn      name      address         sid  pname   gpa
+  -------- --------- ---------------- ---- ------- ----
+  111-22   Alice     123 Main St       1    Alice   3.7
+  111-22   Alice     123 Main St       2    Bob     3.2
+  222-33   Bob       456 Oak Ave       1    Alice   3.7
+  222-33   Bob       456 Oak Ave       2    Bob     3.2
+
+  Notice: the pairing is blind — "Alice from SSNs" is paired with "Bob from
+  Enrollments," which has no real-world meaning.
+
+  SQL equivalent: SELECT * FROM SSNs CROSS JOIN Enrollments;
+
+
+5. RENAMING (RHO, ρ)
+---------------------
+
+Definition:
+  Renaming changes the NAME of a relation or one of its attributes. It
+  changes the SCHEMA without altering the INSTANCE — the data stays the same.
+
+Notation:
+  ρ_newName(R)                          — rename the whole relation to newName
+  ρ_newName(attr1, attr2, ...)(R)       — rename relation and attributes in order
+  ρ_newName[attr1, attr2](R)            — rename specific attributes only
+
+Example — Students(sid, sname, gpa, ptavg):
+
+  sid  sname   gpa  ptavg
+  ---- ------- ---- -----
+  1    Alice   3.7  3.9
+  2    Bob     3.2  3.1
+
+  Rename the table and its columns:
+  Relational algebra:  ρHonors(sid, name, gpa, ptavg)(Students)
+  SQL equivalent:      SELECT sid AS student_id,
+                             sname AS name,
+                             gpa,
+                             ptavg
+                       FROM Students;
+
+  Result (rename Students to Honors, alias sname to name):
+  sid  name    gpa  ptavg
+  ---- ------- ---- -----
+  1    Alice   3.7  3.9
+  2    Bob     3.2  3.1
+
+  Renaming is especially useful for self-joins (comparing a table to itself)
+  where you need two unambiguous copies of the same relation.
+
+
+6. NATURAL JOIN (⋈)
+---------------------
+
+Definition:
+  The natural join combines two relations by matching tuples that share equal
+  values on all attributes with the SAME NAME. Unlike the cross product, it
+  pairs only meaningful rows. The shared columns appear once in the output.
+  Unmatched tuples on either side are dropped (inner join semantics).
+
+Notation: R ⋈ S
+
+Formal definition:
+  R ⋈ S = π_schema(R ∪ schema(S)) ( σ_matching-condition ( R × S ) )
+  That is, a cross product restricted to matching rows, then projected to
+  the union of schemas with common columns kept once.
+
+Example 1 — Orders ⋈ Customers (shared key: customer_id):
+
+  Orders(order_id, customer_id, amount):
+  order_id  customer_id  amount
+  --------  -----------  -------
+  1001      501          45.00
+  1002      501          30.00
+  1003      502          12.50
+
+  Customers(customer_id, customer_name, city):
+  customer_id  customer_name  city
+  -----------  --------------- --------
+  501          Alice          Chicago
+  502          Bob            Denver
+
+  Orders ⋈ Customers:
+  order_id  customer_id  amount   customer_name  city
+  --------  -----------  -------  --------------- --------
+  1001      501          45.00    Alice          Chicago
+  1002      501          30.00    Alice          Chicago
+  1003      502          12.50    Bob            Denver
+
+  SQL equivalent:
+  SELECT * FROM Orders NATURAL JOIN Customers;
+
+Example 2 — Natural join on a shared Name attribute (Student ⋈ People):
+
+  Both tables share the attribute "Name."
+
+  Student(sid, Name, gpa):
+  sid  Name   gpa
+  ---- ------ ----
+  1    Alice   3.7
+  2    Bob     3.2
+  3    Carol   3.9
+  4    Eve     3.5
+
+  People(Name, address, phone):
+  Name   address            phone
+  ------ ------------------ --------
+  Alice  123 Main St        555-0101
+  Bob    456 Oak Ave        555-0102
+  Carol  789 Pine Rd        555-0103
+  Dave   321 Elm St         555-0104
+
+  Student ⋈ People (matched on Name):
+  sid  Name   gpa   address            phone
+  ---- ------ ---- ------------------ --------
+  1    Alice   3.7 123 Main St        555-0101
+  2    Bob     3.2 456 Oak Ave        555-0102
+  3    Carol   3.9 789 Pine Rd        555-0103
+
+  Eve is dropped (no matching person named "Eve").
+  Dave is dropped (no matching student named "Dave").
+
+  SQL equivalent:
+  SELECT * FROM Student NATURAL JOIN People;
+
+
+7. UNION (∪)
+-------------
+
+Definition:
+  Set union combines the tuples of two relations into a single relation.
+  Because relations are sets, the result contains each tuple only once —
+  duplicates are removed.
+
+Formal notation: R ∪ S
+Formal definition: R ∪ S = { t | t ∈ R  or  t ∈ S }
+
+Constraints (union compatibility):
+  - Both R and S must have the same number of attributes (same arity).
+  - Corresponding attributes must have compatible domains (types).
+  - The schema of the result is the schema of R (the first operand).
+
+Example — CS_Students(Name) and Math_Students(Name):
+
+  CS_Students:
+  Name
+  ------
+  Alice
+  Bob
+  Carol
+
+  Math_Students:
+  Name
+  ------
+  Bob
+  Dave
+  Eve
+
+  CS_Students ∪ Math_Students:
+  Name
+  ------
+  Alice
+  Bob
+  Carol
+  Dave
+  Eve
+
+  (Bob appeared in both relations but is kept only once.)
+  SQL equivalent:
+  SELECT Name FROM CS_Students
+  UNION
+  SELECT Name FROM Math_Students;
+
+  Note: UNION ALL in SQL is the multiset version — it keeps duplicates.
+  Standard relational algebra (and UNION) always removes duplicates.
+
+
+8. DERIVED RA OPERATORS
+------------------------
+
+The five operators above (selection, projection, cross product, renaming,
+natural join) are "basic" or "primitive." Every other relational operator can
+be expressed as a combination of these. These additional operators are called
+"derived operators."
+
+  Set union (R ∪ S)            — add matching tuples (see section 7)
+  Set difference (R − S)       — tuples in R but not in S
+  Set intersection (R ∩ S)     — tuples in both R and S
+      Note: R ∩ S can be written as R − (R − S).
+  Assignment (←)               — name an intermediate result for reuse
+      Example: temp ← σ_gpa > 3.0(Students)
+               TopStudents ← π_name(temp)
+      SQL analog: WITH temp AS (...) SELECT name FROM temp;
+  Division (R ÷ S)             — "for every S-tuple, find matching R-tuples"
+
+Set operators (union, difference, intersection) require union-compatible
+operands: the same number of attributes with compatible types.
+
+
+9. RELATIONAL ALGEBRA ARCHITECTURE AND PLAN EXECUTION
+------------------------------------------------------
+
+Relational algebra is not just a mathematical notation — it is the foundation
+for how database systems actually execute queries. The query-processing
+architecture turns a high-level query into an efficient execution plan in
+three stages.
+
+Stage 1 — Parsing and Translation
+  The query is parsed into a syntactic tree and translated into a relational
+  algebra expression tree. Each node is an operator (σ, π, ⋈, etc.).
+
+  Example: "SELECT name FROM Students WHERE gpa > 3.5"
+  becomes: π_name(σ_gpa > 3.5(Students))
+
+      [π_name] ← [σ_gpa > 3.5] ← [Students]
+
+Stage 2 — Query Optimization
+  The optimizer transforms the expression tree into an equivalent but more
+  efficient plan in two layers:
+
+  1. Logical optimization — rewrite using algebraic equivalences:
+     - Push selections down (apply σ early to reduce tuples).
+     - Project early (apply π early to reduce columns).
+     - Reorder joins to minimize intermediate results.
+
+  2. Physical optimization — choose concrete implementations:
+     - Access method: full scan vs index scan.
+     - Join algorithm: nested-loop, hash join, or sort-merge join.
+     - Operator variant: index selection vs sequential scan.
+
+  The optimizer uses statistics (row counts, index availability, data
+  distributions) to estimate cost and pick the cheapest plan.
+
+Stage 3 — Query Execution
+  The optimized plan is evaluated against the actual data. Logical RA
+  operators get physical implementations that decide HOW to access and
+  process data.
+
+RA Plan Execution: Index-Based Access for Large Tables
+  When a table is large, a full table scan can be expensive. An index lets
+  the system jump directly to relevant tuples.
+
+  Point query (WHERE id = 5):
+    - Hash index: O(1) lookup
+    - B+ tree index: O(log n) lookup
+    - RA notation: IndexSelect_{id=5}(R)
+
+  Range query (WHERE salary > 65000):
+    - B+ tree index: O(log n + k) — find start, scan forward
+    - RA notation: IndexSelect_{salary > 65000}(R)
+
+  Example — Employees(ssn, name, salary) with B+ tree index on salary:
+
+  Index lookup:  σ_salary > 65000 uses the index to jump to the 65K+
+                 range, scanning only matching leaf entries instead of
+                 the entire table.
+
+  The index lets the system find matching tuples WITHOUT reading the whole
+  table — critical for large tables. This is a physical selection:
+  IndexSelect instead of a Scan.
+
+RA Plan Execution: Projection for Hashing
+  When a query projects only a few columns from a large table, the system
+  can use hash-based projection to reduce memory and enable fast downstream
+  processing:
+
+  1. Reduce data volume — load and hash only the projected columns, not
+     the entire tuple. With many wide columns, this cuts I/O dramatically.
+  2. Hash-based deduplication — build a hash table on projected columns;
+     tuples with the same hash bucket collapse to one (implements π's
+     duplicate removal).
+  3. Feed hash-based algorithms — the hashed projection directly feeds:
+     - Hash joins — build a hash table on one relation's join key.
+     - Hash aggregation (GROUP BY) — same hashing principle.
+
+  Example — π_ssn, name(Employees) on a 10-million-row table with 10
+  columns:
+
+  Logical plan:
+    π_ssn, name(Employees)
+
+  Physical plan with hashing:
+    [Full Scan or Index Scan on Employees]
+          |
+          v
+    [Hash Project: ssn, name]  -- hash on (ssn, name)
+          |
+          v
+    [Hash Table]  -- duplicates removed
+          |
+          v
+    Result (distinct ssn/name pairs)
+
+  Instead of materializing full tuples (all 10 columns), the system hashes
+  tuples on just (ssn, name), keeping only distinct hash buckets in memory.
+
+RA Plan Execution: Sort-Based Strategies
+  Sorting a relation on specific attributes enables several optimizations:
+
+  1. Sort-merge join — sort both inputs by the join key, then merge in
+     O(n + m). Beats nested-loop O(n × m) for large inputs.
+  2. Sort-based duplicate elimination — sort tuples, then remove adjacent
+     duplicates (implements π's set semantics without a hash table).
+  3. Sorted output / ORDER BY — sorting early avoids a separate sort later.
+  4. Sorted index access — B+ tree index scans already return sorted order.
+
+  Example — σ_gpa > 3.5(Students) ordered by name:
+
+  Logical plan:
+    π_name(σ_gpa > 3.5(Students))
+
+  Physical plan with sort:
+    [Scan Students]
+          |
+          v
+    [Filter: gpa > 3.5]         -- selection pushed early
+          |
+          v
+    [Hash Project: name]        -- or sort project
+          |
+          v
+    [Sort on name]              -- enables sorted output
+          |
+          v
+    Result
+
+Putting It Together: Physical Plan Example
+  Consider: SELECT DISTINCT name FROM Students WHERE gpa > 3.5;
+
+  Logical RA: π_name(σ_gpa > 3.5(Students))
+
+  Physical plan:
+
+    Students
+      |
+      | [IndexSelect on gpa > 3.5 using B+ tree index on gpa]
+      v
+    FilteredStudents (fewer rows, full schema)
+      |
+      | [Project: name only — reduce columns; use hashing for dedup]
+      v
+    Result (distinct names, sorted if needed)
+
+  The optimizer picks INDEX SELECTION (gpa has an index, filter is
+  selective), HASH PROJECTION (need distinct values on a few columns),
+  and optionally SORT (if ORDER BY name was present). All three work
+  together in one plan.
+
+Summary:
+  - Logical RA operators (σ, π, ⋈) define WHAT to compute.
+  - The query architecture adds physical layers (index, hash, sort) that
+    decide HOW to compute it efficiently.
+  - For large tables: indexes replace scans for selective conditions;
+    hashing accelerates projection and deduplication; sorting enables
+    merge joins and ordered output.
+
+
+10. SET OPERATIONS IN RELATIONAL ALGEBRA
+----------------------------------------
+
+Set-based operators treat relations as sets and combine their tuples.
+
+Constraints: operands must be union-compatible — same arity, compatible types.
+
+Operations:
+
+  Set union (R ∪ S):
+    tuples in R or S (or both), duplicates removed
+    requires union compatibility
+
+  Set difference (R − S):
+    tuples in R but not in S
+    requires union compatibility
+
+  Set intersection (R ∩ S):
+    tuples in both R and S
+    requires union compatibility
+    can be expressed as R − (R − S)
+
+  Cross product (R × S):
+    all pairs of tuples, m × n rows
+    (already covered in section 4)
+
+Examples with R(A, B) and S(A, B):
+
+  R(A, B):          S(A, B):
+  A   B            A   B
+  1   10           2   20
+  2   20           4   40
+  3   30           5   50
+
+  Union R ∪ S:
+  A   B
+  1   10
+  2   20
+  3   30
+  4   40
+  5   50
+
+  Difference R − S:
+  A   B
+  1   10
+  3   30
+
+  Intersection R ∩ S:
+  A   B
+  2   20
+
+  Arrow summary:
+  R       S       R ∪ S = 5 tuples   R ∩ S = 1 tuple   R − S = 2 tuples
+  1,10    2,20                         2,20            1,10; 3,30
+  2,20    4,40
+  3,30    5,50
+
+
+11. ADVANCED JOIN TYPES
+------------------------
+
+The natural join is one member of a family of join operators. Hierarchy:
+  theta-join ⊃ equi-join ⊃ natural join
+  also: semijoin, antijoin, outer joins
+
+R and S (no shared attribute names):
+  R(A, B):          S(C, D):
+  A   B            C   D
+  1   10           10  50
+  2   20           20  60
+  3   30           30  70
+
+  Theta join (⋈_θ):
+    notation R ⋈_θ S
+    definition pairs tuples where condition θ is true (any comparison: =, <, >, ≠)
+    definition R ⋈_θ S = σ_θ(R × S)
+    example R ⋈_{B < C} S:
+    A   B    C   D
+    1   10   20  60
+    1   10   30  70
+    2   20   30  70
+
+  Equi-join (⋈_{a=b}):
+    notation R ⋈_{R.a = S.b} S
+    definition theta join where θ is equality (=)
+    note both joined columns appear in output (unlike natural join)
+    example R ⋈_{B = C} S:
+    A   B    C   D
+    1   10   10  50
+    2   20   20  60
+    3   30   30  70
+
+R and S (shared attribute B):
+  R(A, B):          S(B, C):
+  A   B            B    C
+  1   10           10   x
+  2   20           20   y
+  3   30           40   z
+
+  Natural join (⋈):
+    notation R ⋈ S
+    definition equi-join on all shared attribute names; shared column appears once
+    example R ⋈ S:
+    A   B    C
+    1   10   x
+    2   20   y
+
+  Semi-join (⋉):
+    notation R ⋉ S
+    definition R tuples that have a match in S; R columns only
+    example R ⋉ S:
+    A   B
+    1   10
+    2   20
+
+  Anti-join (▷):
+    notation R ▷ S
+    definition R tuples that have NO match in S
+    example R ▷ S:
+    A   B
+    3   30
+
+  Left outer join (⟕):
+    notation R ⟕ S
+    definition all R tuples; unmatched S columns are NULL
+    example R ⟕ S:
+    A   B    C
+    1   10   x
+    2   20   y
+    3   30   NULL
+
+  Right outer join (⟖):
+    notation R ⟖ S
+    definition all S tuples; unmatched R columns are NULL
+    example R ⟖ S:
+    A     B    C
+    1     10   x
+    2     20   y
+    NULL  40   z
+
+  Full outer join (⟗):
+    notation R ⟗ S
+    definition all tuples from both; unmatched columns are NULL
+    example R ⟗ S:
+    A     B    C
+    1     10   x
+    2     20   y
+    3     30   NULL
+    NULL  40   z
+
+
+12. DIVISION (÷) — THE "FOR ALL" OPERATOR
+-----------------------------------------
+
+Division answers "for all" queries: find A-values paired with ALL B-values.
+
+Notation: R ÷ S
+Definition: R has attributes A, B. S has only B-attributes. The result is all
+A-tuples such that for every B-tuple in S, the combination (A-tuple, B-tuple)
+appears in R.
+
+Formal: R ÷ S = { t_R[A] | for all t_S in S, (t_R[A], t_S[B]) is in R }
+
+Derived using basic operators:
+  R ÷ S = π_A(R) − π_A( (π_A(R) × S) − R )
+
+Intuition:
+  1. (π_A(R) × S) — every A-combo cross-joined with every B-tuple from S
+  2. Subtract R: what (A,B) pairs are MISSING from R
+  3. Project to A: A-values missing some B-tuple
+  4. Subtract from π_A(R): A-values with NO missing B-tuple = all B-tuples
+
+Example — Enrollments(sid, subject) ÷ AllSubjects(subject):
+
+  Enrollments:
+  sid  subject
+  1    DB
+  1    OS
+  1    Networks
+  2    DB
+  2    OS
+  3    DB
+  3    OS
+  3    Networks
+
+  AllSubjects:
+  subject
+  DB
+  OS
+  Networks
+
+  Result R ÷ S:
+  sid
+  1
+  3
+
+  Student 1 has all 3 subjects. Student 2 missing Networks.
+  Student 3 has all 3 subjects.
+
+  SQL (double NOT EXISTS):
+  SELECT DISTINCT e1.sid
+  FROM Enrollments e1
+  WHERE NOT EXISTS (
+      SELECT 1 FROM AllSubjects s
+      WHERE NOT EXISTS (
+          SELECT 1 FROM Enrollments e2
+          WHERE e2.sid = e1.sid AND e2.subject = s.subject
+      )
+  );
+
+  SQL (GROUP BY with COUNT):
+  SELECT sid
+  FROM Enrollments
+  GROUP BY sid
+  HAVING COUNT(DISTINCT subject) = (SELECT COUNT(*) FROM AllSubjects);
+
+
+13. UNIFIED EXAMPLE: STUDENTS AND SUBJECTS
+------------------------------------------
+
+Three tables demonstrating every RA operator:
+
+  Students(sid, name, major):
+  sid  name    major
+  1    Alice   CS
+  2    Bob     CS
+  3    Carol   Math
+  4    Dan     CS
+
+  Enrollments(sid, subject, grade):
+  sid  subject    grade
+  1    DB         92
+  1    OS         88
+  1    Networks   90
+  2    DB         78
+  2    OS         85
+  3    DB         95
+  3    Networks   87
+
+  Subjects(subject, credits):
+  subject     credits
+  DB          3
+  OS          4
+  Networks    3
+
+  Selection σ_grade > 90(Enrollments):
+  sid  subject    grade
+  1    DB         92
+  3    DB         95
+
+  Projection π_name(σ_grade > 90(Enrollments ⋈ Students)):
+  name
+  Alice
+  Carol
+
+  Natural join Enrollments ⋈ Students (on sid):
+  sid  name    major   subject    grade
+  1    Alice   CS      DB         92
+  1    Alice   CS      OS         88
+  1    Alice   CS      Networks   90
+  2    Bob     CS      DB         78
+  2    Bob     CS      OS         85
+  3    Carol   Math    DB         95
+  3    Carol   Math    Networks   87
+
+  Renaming ρCS_Majors(σ_major = 'CS'(Students)):
+  sid  name    major
+  1    Alice   CS
+  2    Bob     CS
+  4    Dan     CS
+
+  Semi-join Students ⋉ π_sid(Enrollments):
+  sid  name    major
+  1    Alice   CS
+  2    Bob     CS
+  3    Carol   Math
+  (Dan excluded — no enrollment records)
+
+  Anti-join Students ▷ π_sid(Enrollments):
+  sid  name    major
+  4    Dan     CS
+
+  Left outer join Students ⟕ Enrollments:
+  sid  name    major   subject    grade
+  1    Alice   CS      DB         92
+  1    Alice   CS      OS         88
+  1    Alice   CS      Networks   90
+  2    Bob     CS      DB         78
+  2    Bob     CS      OS         85
+  3    Carol   Math    DB         95
+  3    Carol   Math    Networks   87
+  4    Dan     CS      NULL       NULL
+
+  Division Enrollments ÷ π_subject(Subjects):
+  sid
+  1
+  (Only Alice has all 3 subjects; Carol missing OS, Bob missing Networks)
+
+  Set operations (CS_majors = σ_major='CS'(Students), Math_majors = σ_major='Math'(Students)):
+  Union CS_majors ∪ Math_majors:
+  sid  name    major
+  1    Alice   CS
+  2    Bob     CS
+  3    Carol   Math
+  4    Dan     CS
+
+  Difference CS_majors − Math_majors:
+  sid  name    major
+  1    Alice   CS
+  2    Bob     CS
+  4    Dan     CS
+
+
+14. LIMITATIONS OF RELATIONAL ALGEBRA AND RELATIONAL COMPLETENESS
+-----------------------------------------------------------------
+
+Relational algebra has well-known boundaries:
+
+1. No transitive closure / recursion:
+   RA cannot express queries about paths of arbitrary length.
+   Example: "find all employees who report (directly or indirectly) to manager M"
+   requires recursion. Core RA can do k-step joins for any fixed k, but not
+   "any number of steps." SQL adds WITH RECURSIVE.
+
+2. No aggregation in core RA:
+   No SUM, COUNT, AVG, MIN, MAX. Aggregation is an extension.
+
+3. No ordering:
+   RA relations are sets (unordered). ORDER BY is a post-processing step.
+
+4. No duplicate bags:
+   Core RA uses set semantics. SQL uses multisets (superset).
+
+Transitive closure example:
+  Edges(from, to):
+  from  to
+  1     2
+  2     3
+  3     4
+
+  Reachable(from, to):
+  from  to
+  1     2   (direct)
+  1     3   (1→2→3)
+  1     4   (1→2→3→4)
+  2     3   (direct)
+  2     4   (2→3→4)
+  3     4   (direct)
+
+  RA can express "reachable in exactly k steps" for fixed k, but NOT
+  "reachable in any number of steps." Requires recursion.
+
+  SQL WITH RECURSIVE:
+  WITH RECURSIVE Reach(a, b) AS (
+      SELECT "from", "to" FROM Edges
+      UNION
+      SELECT r.a, e.to FROM Reach r, Edges e
+      WHERE r.b = e.from
+  )
+  SELECT * FROM Reach;
+
+Relational completeness:
+  A query language is relationally complete if it can express every query that
+  relational algebra (or relational calculus) can express. Standard SQL (without
+  WITH RECURSIVE) is relationally complete.
+
+  RA is relationally complete but NOT Turing complete. It sits at a fixed level
+  of expressive power.
+
+  Expressive power hierarchy:
+  Relational Algebra = Relational Calculus = Standard SQL (no recursion)
+         <
+  SQL WITH RECURSIVE (adds transitive closure / recursion)
+         <
+  Full PL/polyglot programming (Turing complete)
+
+  Key takeaway: RA is relationally complete but cannot compute transitive
+  closure or any recursive query. This is by design — RA gives a clean, finite,
+  mathematically tractable query language, at the cost of not being able to
+  express unbounded recursion directly.
+
+
