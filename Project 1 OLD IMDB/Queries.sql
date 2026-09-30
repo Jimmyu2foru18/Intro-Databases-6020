@@ -168,6 +168,44 @@ GROUP BY people.id
 HAVING COUNT(ratings.movie_id) > 1
 ORDER BY rating_difference DESC;
 
+-- Q16 had to look this up to get title 
+
+SELECT 
+    p.name AS actor_name,
+    (
+        SELECT m.title 
+        FROM movies m 
+        JOIN stars s ON m.id = s.movie_id 
+        JOIN ratings r ON m.id = r.movie_id 
+        WHERE s.person_id = p.id AND r.rating = stats.highest_rating 
+        LIMIT 1
+    ) AS highest_rated_movie,
+    stats.highest_rating,
+    (
+        SELECT m.title 
+        FROM movies m 
+        JOIN stars s ON m.id = s.movie_id 
+        JOIN ratings r ON m.id = r.movie_id 
+        WHERE s.person_id = p.id AND r.rating = stats.lowest_rating 
+        LIMIT 1
+    ) AS lowest_rated_movie,
+    stats.lowest_rating,
+    stats.rating_difference
+FROM people p
+JOIN (
+    SELECT 
+        s.person_id,
+        MAX(r.rating) AS highest_rating,
+        MIN(r.rating) AS lowest_rating,
+        MAX(r.rating) - MIN(r.rating) AS rating_difference
+    FROM stars s
+    JOIN ratings r ON s.movie_id = r.movie_id
+    GROUP BY s.person_id
+    HAVING COUNT(r.rating) > 1
+) stats ON p.id = stats.person_id
+ORDER BY stats.rating_difference DESC;
+
+
 -- Q17
 
 SELECT name,
