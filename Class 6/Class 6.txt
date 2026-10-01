@@ -923,3 +923,134 @@ Relational completeness:
   express unbounded recursion directly.
 
 
+15. PRACTICAL EXAMPLE: DIVISION IN ACTION — "SAME COURSES AS STUDENT 40"
+------------------------------------------------------------------------
+
+Query: "Find all computer science students who take all the same courses
+as student ID 40."
+
+Schema:
+  Students(sid, name, major)
+  Enrollments(sid, course_id, grade)
+
+Sample data:
+
+  Students:
+  sid  name    major
+  10   Alice   CS
+  20   Bob     CS
+  40   Carol   CS
+  50   Dave    CS
+  60   Eve     Math
+
+  Enrollments:
+  sid  course_id  grade
+  10   CS101      88
+  10   CS201      92
+  10   CS301      85
+  10   MATH101    82
+  20   CS101      78
+  20   CS201      90
+  20   CS301      85
+  20   MATH101    88
+  40   CS101      95
+  40   CS301      87
+  40   MATH101    80
+  50   CS101      90
+  50   MATH101    88
+  60   CS101      75
+  60   MATH101    88
+
+Student 40 (Carol) takes: CS101, CS301, MATH101
+
+Step-by-step relational algebra:
+
+  Step 1: Find all courses taken by student 40.
+    T1 = π_course_id(σ_sid = 40(Enrollments))
+    T1 = {CS101, CS301, MATH101}
+
+  Step 2: Identify CS students.
+    T2 = π_sid(σ_major = 'CS'(Students))
+    T2 = {10, 20, 40, 50}
+
+  Step 3: Get (sid, course_id) pairs for all CS students.
+    T3 = π_sid, course_id(T2 ⋈ Enrollments)
+    T3 contains all sid/course pairs for CS students
+
+  Step 4: Division — find CS students who take ALL of student 40's courses.
+    Result = T3 ÷ T1
+
+    Check each CS student:
+    - sid=10 (Alice): CS101 ✓, CS301 ✓, MATH101 ✓ → takes ALL → YES
+    - sid=20 (Bob):   CS101 ✓, CS301 ✓, MATH101 ✓ → takes ALL → YES
+    - sid=40 (Carol): CS101 ✓, CS301 ✓, MATH101 ✓ → takes ALL → YES
+    - sid=50 (Dave):  CS101 ✓, CS301 ✗, MATH101 ✓ → missing CS301 → NO
+
+    Result = {10, 20, 40}
+
+  Step 5: Join back to Students to get names.
+    π_sid, name(Result ⋈ Students)
+    = {Alice, Bob, Carol}
+
+  Step 6: Exclude student 40 themselves.
+    σ_sid ≠ 40(...)
+    Final result = {Alice, Bob}
+
+Complete relational algebra expression:
+  π_sid, name(
+    σ_sid ≠ 40(
+      (π_sid, course_id(π_sid(σ_major = 'CS'(Students)) ⋈ Enrollments))
+      ÷
+      π_course_id(σ_sid = 40(Enrollments))
+    ) ⋈ Students
+  )
+
+Equivalent SQL (double NOT EXISTS):
+  SELECT s.sid, s.name
+  FROM Students s
+  WHERE s.major = 'CS'
+    AND s.sid != 40
+    AND NOT EXISTS (
+      SELECT 1 FROM Enrollments e40
+      WHERE e40.sid = 40
+        AND NOT EXISTS (
+          SELECT 1 FROM Enrollments e
+          WHERE e.sid = s.sid
+            AND e.course_id = e40.course_id
+        )
+    );
+
+Mapping SQL to relational algebra:
+  - Inner subquery (e40.sid = 40)    → Step 1: courses of student 40
+  - WHERE s.major = 'CS'              → Step 2: identify CS students
+  - e.course_id = e40.course_id       → Step 3: pair CS student courses
+  - NOT EXISTS(...)                   → Step 4: division (universal quantification)
+  - s.sid != 40                       → Step 6: exclude student 40
+  - SELECT s.sid, s.name              → Step 5: join with Students for names
+
+How the NOT EXISTS pattern works:
+  - The INNER NOT EXISTS finds "a course that student 40 takes but the
+    candidate does NOT take."
+  - The OUTER NOT EXISTS means "there is NO such course" = the candidate
+    takes ALL of student 40's courses.
+  - This is the universal quantifier "ALL" expressed via double negation.
+
+Arrow summary:
+  Enrollments --σ_sid=40--> courses_40 = {CS101, CS301, MATH101}
+         |
+  Students --σ_major='CS'--> CS_sids = {10, 20, 40, 50}
+         |
+  CS_enrollments ⋈ Enrollments --> T3 (sid × course pairs for CS students)
+         |
+  T3 ÷ courses_40 --> {10, 20, 40}  (all take all 3 courses)
+         |
+  σ_sid≠40 --> {10, 20}  (exclude Carol)
+         |
+  ⋈ Students --> Alice, Bob
+
+Key takeaway: Division (÷) is the RA tool for "for all" queries. The SQL
+translation uses double-NOT-EXISTS: "there is no course that student 40 takes
+that the candidate does not." The outer NOT EXISTS implements the universal
+quantifier (ALL), and the inner NOT EXISTS finds the gap (missing course).
+
+

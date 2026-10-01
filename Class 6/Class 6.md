@@ -1662,7 +1662,228 @@ it cannot compute transitive closure or any recursive query. This is by design: 
 gives us a clean, finite, mathematically tractable query language, at the cost of
 not being able to express unbounded recursion directly.
 
-## 15. Relational Algebra Cheat Sheet
+## 15. Practical Example: Division in Action — "Same Courses as Student 40"
+
+This section walks through a classic "for all" query using the division operator:
+**"Find all computer science students who take all the same courses as student ID
+40."**
+
+### Schema
+
+```
+Students(sid, name, major)
+Enrollments(sid, course_id, grade)
+```
+
+### Sample data
+
+`Students`:
+
+```text
+sid  name    major
+10   Alice   CS
+20   Bob     CS
+40   Carol   CS
+50   Dave    CS
+60   Eve     Math
+```
+
+`Enrollments`:
+
+```text
+sid  course_id  grade
+10   CS101      88
+10   CS201      92
+10   CS301      85
+10   MATH101    82
+20   CS101      78
+20   CS201      90
+20   CS301      85
+20   MATH101    88
+40   CS101      95
+40   CS301      87
+40   MATH101    80
+50   CS101      90
+50   MATH101    88
+60   CS101      75
+60   MATH101    88
+```
+
+Student 40 (Carol) takes: **CS101, CS301, MATH101**
+
+### Step-by-step relational algebra solution
+
+**Step 1: Find all courses taken by student 40.**
+
+```
+T1 = π_course_id(σ_sid = 40(Enrollments))
+```
+
+```text
+course_id
+CS101
+CS301
+MATH101
+```
+
+**Step 2: Identify CS students.**
+
+```
+T2 = π_sid(σ_major = 'CS'(Students))
+```
+
+```text
+sid
+10   (Alice)
+20   (Bob)
+40   (Carol)
+50   (Dave)
+```
+
+**Step 3: Get (sid, course_id) pairs for all CS students.**
+
+```
+T3 = π_sid, course_id(T2 ⋈ Enrollments)
+```
+
+```text
+sid  course_id
+10   CS101
+10   CS201
+10   CS301
+10   MATH101
+20   CS101
+20   CS201
+20   CS301
+20   MATH101
+40   CS101
+40   CS301
+40   MATH101
+50   CS101
+50   MATH101
+```
+
+**Step 4: Division — find CS students who take ALL of student 40's courses.**
+
+```
+Result = T3 ÷ T1
+```
+
+The division finds all `sid` values in T3 such that every `course_id` in T1 appears
+paired with that `sid`. Let's check each:
+
+| sid | CS101? | CS301? | MATH101? | All three? |
+|-----|--------|--------|----------|------------|
+| 10  | ✓      | ✓      | ✓        | **Yes**    |
+| 20  | ✓      | ✓      | ✓        | **Yes**    |
+| 40  | ✓      | ✓      | ✓        | **Yes**    |
+| 50  | ✓      | ✗      | ✓        | No         |
+
+```text
+sid
+10
+20
+40
+```
+
+**Step 5 (optional): Join back to Students to get names.**
+
+```
+π_sid, name(Result ⋈ Students)
+```
+
+```text
+sid  name
+10   Alice
+20   Bob
+40   Carol
+```
+
+**Step 6 (optional): Exclude student 40 themselves.**
+
+```
+σ_sid ≠ 40(π_sid, name(Result ⋈ Students))
+```
+
+```text
+sid  name
+10   Alice
+20   Bob
+```
+
+### Complete relational algebra expression
+
+```
+π_sid, name(
+  σ_sid ≠ 40(
+    (π_sid, course_id(π_sid(σ_major = 'CS'(Students)) ⋈ Enrollments))
+    ÷
+    π_course_id(σ_sid = 40(Enrollments))
+  ) ⋈ Students
+)
+```
+
+### Equivalent SQL using double NOT EXISTS
+
+```sql
+SELECT s.sid, s.name
+FROM Students s
+WHERE s.major = 'CS'
+  AND s.sid != 40
+  AND NOT EXISTS (
+    -- A course that student 40 takes...
+    SELECT 1
+    FROM Enrollments e40
+    WHERE e40.sid = 40
+      AND NOT EXISTS (
+        -- ...but the candidate student does NOT take it
+        SELECT 1
+        FROM Enrollments e
+        WHERE e.sid = s.sid
+          AND e.course_id = e40.course_id
+      )
+  );
+```
+
+The **outer NOT EXISTS** means "there is no course that the candidate is missing."
+The **inner NOT EXISTS** finds "a course that student 40 takes but the candidate
+does not take." If that inner query returns nothing for a candidate, the outer
+NOT EXISTS is satisfied, and the candidate qualifies.
+
+### How the SQL maps to the relational algebra
+
+```text
+Step 1  →  Inner subquery: σ_sid=40(Enrollments) → courses of student 40
+Step 2  →  WHERE s.major = 'CS' → filter CS students
+Step 3  →  e.course_id = e40.course_id → pairing (sid, course_id) from CS students
+Step 4  →  NOT EXISTS(...) → division: "takes ALL courses" (universal quantification)
+Step 5  →  σ_sid ≠ 40 → exclude student 40
+Step 6  →  SELECT s.sid, s.name → join with Students for names
+```
+
+**Arrow summary:**
+
+```text
+Enrollments --σ_sid=40--> courses_40 = {CS101, CS301, MATH101}
+       |
+Students --σ_major='CS'--> CS_sids = {10, 20, 40, 50}
+       |
+CS_enrollments ⋈ Enrollments --> T3 (sid × course pairs for CS students)
+       |
+T3 ÷ courses_40 --> {10, 20, 40}  (all take all 3 courses)
+       |
+σ_sid≠40 --> {10, 20}  (exclude Carol)
+       |
+⋈ Students --> Alice, Bob
+```
+
+> **Key takeaway:** Division (÷) is the relational algebra tool for "for all"
+queries. The SQL translation uses the double-NOT-EXISTS pattern: "there is no
+course that student 40 takes that the candidate does not." The outer NOT EXISTS
+implements the universal quantifier ("ALL courses"), and the inner NOT EXISTS finds
+the gap ("the candidate is missing this course").
+
+## 16. Relational Algebra Cheat Sheet
 
 | Concept | Notation | Description |
 |---|---|---|
@@ -1697,3 +1918,4 @@ five core operators plus the set-derived ones, and you can express any relationa
 query. Selection filters rows, projection narrows columns, joins and products
 combine relations, and renaming improves readability — all while preserving the
 closure property that makes composition possible.
+
