@@ -625,10 +625,7 @@ age = 9 occurs 4 times
 then:
 
 $$
-Selectivity =
-\frac{4}{45}
-=
-0.0889
+Selectivity =\frac{4}{45}=0.0889
 $$
 
 Estimated cardinality:
@@ -657,17 +654,13 @@ Number of possible values = 5
 Therefore:
 
 $$
-EstimatedCount =
-\frac{9}{5}
-=
-1.8
+EstimatedCount = \frac{9}{5} = 1.8
 $$
 
 And:
 
 $$
-Selectivity =
-\frac{1.8}{N}
+Selectivity = \frac{1.8}{N}
 $$
 
 The important assumption is:
@@ -801,8 +794,7 @@ $$
 Therefore:
 
 $$
-EstimatedCardinality =
-8+9+12
+EstimatedCardinality = 8+9+12
 $$
 
 $$
@@ -844,9 +836,7 @@ first.
 Then:
 
 $$
-Selectivity(age\neq2)
-=
-1-Selectivity(age=2)
+Selectivity(age\neq2) = 1-Selectivity(age=2)
 $$
 
 ### Example
@@ -860,11 +850,7 @@ $$
 then:
 
 $$
-Selectivity(age\neq2)
-=
-1-0.10
-=
-0.90
+Selectivity(age\neq2) = 1-0.10 = 0.90
 $$
 
 So approximately 90% of tuples qualify.
@@ -931,9 +917,7 @@ A common assumption is that predicates are **independent**.
 If:
 
 $$
-P(A\ AND\ B)
-=
-P(A)P(B)
+P(A\ AND\ B) = P(A)P(B)
 $$
 
 then the optimizer can multiply their selectivities.
@@ -955,11 +939,7 @@ $$
 Then:
 
 $$
-P(A\ AND\ B)
-=
-0.10(0.20)
-=
-0.02
+P(A\ AND\ B) = 0.10(0.20) = 0.02
 $$
 
 So the estimated selectivity is:
@@ -981,17 +961,13 @@ WHERE A AND B
 under the independence assumption:
 
 $$
-Sel(A\ AND\ B)
-=
-Sel(A)\times Sel(B)
+Sel(A\ AND\ B) = Sel(A)\times Sel(B)
 $$
 
 For three predicates:
 
 $$
-Sel(A\ AND\ B\ AND\ C)
-=
-Sel(A)Sel(B)Sel(C)
+Sel(A\ AND\ B\ AND\ C) = Sel(A)Sel(B)Sel(C)
 $$
 
 ### Important
@@ -1013,23 +989,19 @@ WHERE A OR B
 the basic probability relationship is:
 
 $$
-P(A\cup B)
-=
-P(A)+P(B)-P(A\cap B)
+P(A\cup B) = P(A)+P(B)-P(A\cap B)
 $$
 
 If independence is assumed:
 
 $$
-P(A\cap B)=P(A)P(B)
+P(A\cap B) = P(A)P(B)
 $$
 
 Therefore:
 
 $$
-P(A\cup B)
-=
-P(A)+P(B)-P(A)P(B)
+P(A\cup B) = P(A)+P(B)-P(A)P(B)
 $$
 
 ### Example
@@ -1047,9 +1019,7 @@ $$
 Then:
 
 $$
-P(A\cup B)
-=
-0.2+0.3-(0.2)(0.3)
+P(A\cup B) = 0.2+0.3-(0.2)(0.3)
 $$
 
 $$
@@ -1110,9 +1080,7 @@ $$
 Under independence:
 
 $$
-\frac{1}{10}\times\frac{1}{100}
-=
-\frac{1}{1000}
+\frac{1}{10}\times\frac{1}{100} = \frac{1}{1000}
 $$
 
 But this is incorrect because:
