@@ -1267,14 +1267,9 @@ $$
 {\max(100,50)}
 $$
 
-$$
-=
-\frac{500,000}{100}
-$$
+$$ =\frac{500,000}{100} $$
 
-$$
-=5,000
-$$
+$$ =5,000 $$
 
 Estimated join cardinality:
 
@@ -1861,8 +1856,7 @@ Therefore, bad statistics can lead to bad cardinality estimates, which can lead 
 ### Selectivity
 
 $$
-Sel(P)=
-\frac{\text{Matching tuples}}
+Sel(P)= \frac{\text{Matching tuples}} 
 {\text{Total tuples}}
 $$
 
@@ -1871,7 +1865,7 @@ $$
 ### Estimated Cardinality
 
 $$
-Cardinality =
+Cardinality = 
 N\times Sel(P)
 $$
 
@@ -1880,9 +1874,7 @@ $$
 ### Equality
 
 $$
-Sel(A=x)
-=
-\frac{Count(A=x)}{N}
+Sel(A=x) = \frac{Count(A=x)}{N}
 $$
 
 ---
@@ -1890,8 +1882,7 @@ $$
 ### NOT EQUAL
 
 $$
-Sel(A\neq x)
-=
+Sel(A\neq x) =
 1-Sel(A=x)
 $$
 
@@ -1902,8 +1893,7 @@ $$
 Under independence:
 
 $$
-Sel(A\land B)
-=
+Sel(A\land B) =
 Sel(A)Sel(B)
 $$
 
@@ -1914,8 +1904,7 @@ $$
 Under independence:
 
 $$
-Sel(A\lor B)
-=
+Sel(A\lor B) =
 Sel(A)+Sel(B)-Sel(A)Sel(B)
 $$
 
@@ -2154,7 +2143,7 @@ The entire process can be summarized as:
 ### Know these formulas
 
 $$
-Selectivity=
+Selectivity =
 \frac{Matching}{Total}
 $$
 
@@ -2171,8 +2160,7 @@ Sel(A\land B)=Sel(A)Sel(B)
 $$
 
 $$
-Sel(A\lor B)
-=
+Sel(A\lor B) =
 Sel(A)+Sel(B)-Sel(A)Sel(B)
 $$
 
