@@ -611,11 +611,7 @@ WHERE age = 9
 
 If we know the exact frequency of the value:
 
-$$
-Selectivity(age=9)
-=
-\frac{Count(age=9)}{N}
-$$
+$$Selectivity(age=9)=\frac{Count(age=9)}{N}$$
 
 ### Example
 
