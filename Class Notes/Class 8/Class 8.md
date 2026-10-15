@@ -754,3 +754,461 @@ the schedule would be conflict serializable with serial order `T2 → T1`.
 > levels trade correctness for concurrency; deadlocks are detected via the
 > wait-for graph and resolved by aborting a victim. Master these, and you can
 > reason about any concurrency scenario.
+
+## 17. Constraints
+
+Constraints are rules that the database enforces to keep data consistent.
+They are the first line of defense against invalid data. Some constraints can
+be expressed declaratively (declared in the `CREATE TABLE` statement), while
+others require procedural code (triggers and assertions — see Sections 18 and 21).
+
+| Constraint type | Symbol | Meaning |
+|---|---|---|
+| Primary key | PK | Unique identifier; must be unique + NOT NULL |
+| Foreign key | FK | Maintains referential integrity |
+| Unique | UNIQUE | Column values must be distinct |
+| Not null | NOT NULL | Column value cannot be NULL |
+| Check | CHECK | Boolean condition on a row or column |
+| Domain | DOMAIN | Data type + constraint on a column |
+
+### Key constraints / primary key
+
+A **primary key** must be both **UNIQUE** (no two rows share the same key
+value) and **NOT NULL** (no row may have a NULL key). The database enforces
+both automatically.
+
+### Foreign keys
+
+A **foreign key** in one table references the primary key (or a unique key) of
+another table. Three referential actions control what happens on delete or
+update of the referenced row:
+
+| Action | Description | DB behavior |
+|---|---|---|
+| CASCADE | Propagate the change | On DELETE: child rows deleted too; On UPDATE: child FK values updated too |
+| RESTRICT | Prevent the change | On DELETE/UPDATE: raises error if child rows exist |
+| SET NULL | Null out the FK in children | On DELETE/UPDATE: child FK columns set to NULL |
+| SET DEFAULT | Set FK to its default | On DELETE/UPDATE: child FK columns set to default value |
+
+### Not null (total participation)
+
+`NOT NULL` enforces that a column always has a value. In ER modeling this
+corresponds to total participation: every entity must participate.
+
+### Unique
+
+The `UNIQUE` constraint ensures all values in a column (or set of columns) are
+distinct. Unlike `PRIMARY KEY`, multiple NULLs are allowed.
+
+> **Key takeaway:** Primary keys, foreign keys, unique, not-null, check, and
+> domain constraints cover most integrity needs declaratively. When they are
+> not enough, triggers (Section 18) and assertions (Section 21) fill the gap.
+
+## 18. Creating Tables with Constraints
+
+A well-designed `CREATE TABLE` embeds constraints as early as possible, so the
+database — not application code — enforces them.
+
+**Example: Employee table**
+
+```sql
+CREATE TABLE Employee(
+  id        INT          PRIMARY KEY,
+  ssn       CHAR(9)      UNIQUE NOT NULL,
+  name      VARCHAR(50),
+  salary      DECIMAL(10,2)  CHECK (salary > 0),
+  dept_id   INT          REFERENCES Department(id)
+                         ON DELETE CASCADE
+                         ON UPDATE CASCADE
+);
+```
+
+- `id` is the PRIMARY KEY → unique + not null (auto-enforced)
+- `ssn` must be unique and not null
+- `salary` must be positive (CHECK)
+- `dept_id` references `Department(id)`; if a department is deleted, all its
+  employees are cascade-deleted
+
+**Example: Check constraints with named constraints**
+
+```sql
+CREATE TABLE check1(
+  name    CHAR(20)    NOT NULL,
+  age     INT,
+  CONSTRAINT check_age  CHECK (age < 100),
+  CONSTRAINT age_unique UNIQUE(age)
+);
+
+INSERT INTO check1 VALUES ('Bob Ross', 21);  -- OK
+-- INSERT INTO check1 VALUES (21);          -- ERROR: name is NOT NULL
+-- INSERT INTO check1 VALUES ('a very long name ...', 21);  -- ERROR: CHAR(20) overflow
+-- INSERT INTO check1 VALUES ('Smith', 121); -- ERROR: age >= 100 violates CHECK
+-- INSERT INTO check1 VALUES ('Bob Ross', 21); -- ERROR: duplicate age violates UNIQUE
+```
+
+> **Key takeaway:** Constraints are declared at table-creation time. `CHECK`
+> handles boolean conditions; `UNIQUE` and `NOT NULL` handle value-level
+> integrity; `PRIMARY KEY` and `FOREIGN KEY` handle entity and referential
+> integrity.
+
+## 19. Triggers — Introduction
+
+Sometimes a constraint cannot be expressed declaratively — for example, "if an
+employee's salary exceeds \$200,000, log the change in an audit table." That
+rule needs procedural logic. A **trigger** is a stored procedure that runs
+automatically when a specified event occurs on a table.
+
+> The application constraint that needs to be captured inside the database.
+
+Some constraints can be captured declaratively by:
+- `PRIMARY KEY`, `FOREIGN KEY`, `UNIQUE`, `NOT NULL`, and `CHECK`.
+- But others — complex business rules, auditing, derived values — require
+  triggers or assertions.
+
+A trigger has **three components**:
+
+| Component | Description |
+|---|---|
+| Event | The table operation that fires the trigger: INSERT, UPDATE, DELETE |
+| Condition | Optional WHEN clause; the trigger body runs only if the condition is true |
+| Action | The procedure body (SQL statements) to execute |
+
+**Syntax (conceptual):**
+
+```sql
+CREATE TRIGGER <name>
+{ BEFORE | AFTER } { INSERT | UPDATE | DELETE }
+ON <table_name>
+FOR EACH { ROW | STATEMENT }
+WHEN (<condition>)
+BEGIN
+  <action>
+END;
+```
+
+> **Key takeaway:** A trigger is an automatic procedure tied to a table event.
+> It has an event (INSERT/UPDATE/DELETE), an optional condition (WHEN), and an
+> action (declarative SQL). Triggers capture logic that simple constraints
+> cannot.
+
+## 20. Trigger Granularity — Row vs. Statement
+
+Triggers fire at two granularities:
+
+| Granularity | When it fires | Use case |
+|---|---|---|
+| Row-level | Once `FOR EACH ROW` affected by the event | Validate or modify each individual row |
+| Statement-level | Triggered once per SQL statement | Audit or summary actions (after a batch completes) |
+
+**Row-level triggers:**
+- Fire once for every row the event touches.
+- Have access to special variables:
+  - `NEW` — the new row values (for INSERT and UPDATE)
+  - `OLD` — the old row values (for DELETE and UPDATE)
+- For an INSERT: only `NEW` is available (the row is brand new).
+- For a DELETE: only `OLD` is available (the row no longer exists).
+- For an UPDATE: both `NEW` and `OLD` are available (you can compare).
+
+**Statement-level triggers:**
+- Fire once, regardless of how many rows the statement affected.
+- Do **not** have access to `NEW` / `OLD` (there is no single row).
+- Used for logging or aggregate checks after an entire operation.
+
+**NEW / OLD availability:**
+
+| Event | NEW available? | OLD available? |
+|---|---|---|
+| INSERT | yes | no |
+| DELETE | no | yes |
+| UPDATE | yes | yes |
+
+**Example (row-level trigger):**
+
+```sql
+CREATE TRIGGER audit_salary
+AFTER UPDATE OF salary ON Employee
+FOR EACH ROW
+BEGIN
+  INSERT INTO SalaryLog(emp_id, old_salary, new_salary, changed_at)
+  VALUES (OLD.id, OLD.salary, NEW.salary, NOW());
+END;
+```
+
+> **Key takeaway:** Row-level triggers see `NEW` and/or `OLD` row values per row.
+> Statement-level triggers fire once per statement and cannot reference `NEW` or
+> `OLD`. Pick the granularity that matches your logic: per-row validation vs.
+> per-statement auditing.
+
+## 21. Order of Trigger Firing
+
+When a table has multiple triggers for the same event, the database fires them
+in a defined order. The typical pipeline is:
+
+```text
+Event occurs (e.g., UPDATE on Employee)
+    |
+    v
+[1] BEFORE STATEMENT trigger fires (once)
+    |
+    v
+[2] BEFORE ROW trigger fires (once per affected row)
+    |
+    v
+[3] The actual row modification happens
+    |
+    v
+[4] AFTER ROW trigger fires (once per affected row)
+    |
+    v
+[5] AFTER STATEMENT trigger fires (once)
+    |
+    v
+All triggers complete; locks released on commit
+```
+
+```text
+BEFORE STATEMENT ──→ BEFORE ROW ──→ Row change ──→ AFTER ROW ──→ AFTER STATEMENT
+```
+
+- **BEFORE triggers** are ideal for validation (reject bad changes before they
+  happen).
+- **AFTER triggers** are ideal for side effects (logging, cascading actions,
+  updating derived data).
+- If a BEFORE trigger fails (raises an error), the triggering statement is
+  aborted and no row change occurs.
+- If an AFTER ROW trigger modifies the same table, the DBMS may or may not
+  re-fire triggers depending on settings (recursive triggers).
+
+> **Key takeaway:** Triggers fire in a predictable order: statement BEFORE, row
+> BEFORE, the change, row AFTER, statement AFTER. Understanding this order lets
+> you design validation (BEFORE) and side-effects (AFTER) correctly.
+
+## 22. Creating and Deleting Triggers
+
+Triggers are created with `CREATE TRIGGER` and removed with `DROP TRIGGER`.
+
+```sql
+-- Create a trigger
+CREATE TRIGGER <name> ...;
+
+-- Delete (drop) a trigger
+DROP TRIGGER IF EXISTS <name>;
+```
+
+**Notes:**
+- Use `IF EXISTS` to avoid an error if the trigger does not exist.
+- Triggers persist until dropped; they are part of the database schema.
+- Some databases (e.g., MySQL) use a `DELIMITER` change when trigger bodies
+  contain semicolons, so the parser can distinguish statement termination from
+  in-body statement termination.
+
+**Example with DELIMITER (MySQL-style):**
+
+```sql
+DELIMITER //
+CREATE TRIGGER before_employee_insert
+BEFORE INSERT ON Employee
+FOR EACH ROW
+BEGIN
+  IF NEW.salary < 0 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Salary must be positive';
+  END IF;
+END//
+DELIMITER ;
+```
+
+> **Key takeaway:** `CREATE TRIGGER` defines the trigger; `DROP TRIGGER`
+> (optionally with `IF EXISTS`) removes it. Some databases require a
+> `DELIMITER` change for bodies containing semicolons.
+
+## 23. Assertions
+
+An **assertion** is a database-wide constraint — a predicate that must always
+remain true for the database as a whole (not just for one row or one table).
+Assertions check relationships across multiple tables at commit time.
+
+**Syntax:**
+
+```sql
+CREATE ASSERTION <name>
+CHECK (<predicate>);
+
+DROP ASSERTION <name>;
+```
+
+**Example — employee salary cap:**
+
+```sql
+CREATE ASSERTION salary_cap
+CHECK (
+  NOT EXISTS (
+    SELECT 1 FROM Employee e
+    WHERE e.salary > 200000
+  )
+);
+```
+
+**Example — total department budget:**
+
+```sql
+CREATE ASSERTION dept_budget
+CHECK (
+  NOT EXISTS (
+    SELECT d.id
+    FROM Department d
+    WHERE (
+      SELECT SUM(e.salary)
+      FROM Employee e
+      WHERE e.dept_id = d.id
+    ) > d.budget
+  )
+);
+```
+
+**How assertions work:**
+- The predicate is evaluated at `COMMIT` time (after the transaction's changes
+  are applied to the buffer).
+- If the assertion would be violated, the `COMMIT` is rejected and the
+  transaction must be rolled back.
+- Assertions are checked against the full database state, so they are more
+  expensive than row-level `CHECK` constraints.
+
+**Limitations:**
+- Not all databases support assertions (e.g., MySQL does not).
+- Because they are checked at commit, they can cause unexpected rollbacks if
+  other concurrent transactions modify the referenced data.
+
+> **Key takeaway:** Assertions enforce cross-table, database-wide conditions.
+> They are checked at commit and rejected if violated. When assertions are not
+> available, triggers are the practical substitute.
+
+## 24. Triggers and Assertions — Cheat Sheet
+
+| Constraint / object | Mechanism |
+|---|---|
+| Column uniqueness | PRIMARY KEY / UNIQUE |
+| Non-null requirement | NOT NULL |
+| Value range / condition | CHECK |
+| Referential integrity | FOREIGN KEY (CASCADE / RESTRICT / SET NULL / SET DEFAULT) |
+| Per-row business logic | Row-level TRIGGER (FOR EACH ROW, NEW/OLD) |
+| Per-statement side effects | Statement-level TRIGGER (FOR EACH STATEMENT) |
+| Cross-table invariant | ASSERTION CHECK (evaluated at COMMIT) |
+
+**Trigger components:**
+
+| Component | Description |
+|---|---|
+| Event | INSERT \| UPDATE \| DELETE |
+| WHEN | optional row condition |
+| Action | procedure body |
+
+**Granularity:**
+
+- `FOR EACH ROW` — fires per row, has NEW and/or OLD
+- `FOR EACH STATEMENT` — fires once, no NEW/OLD
+
+**Firing order:**
+
+```text
+BEFORE STATEMENT → BEFORE ROW → change → AFTER ROW → AFTER STATEMENT
+```
+
+**NEW / OLD availability:**
+
+| Event | NEW | OLD |
+|---|---|---|
+| INSERT | yes | no |
+| DELETE | no | yes |
+| UPDATE | yes | yes |
+
+> **Key takeaway:** Constraints are the declarative layer (PRIMARY KEY, FOREIGN
+> KEY, UNIQUE, NOT NULL, CHECK). Triggers add procedural logic for row-level or
+> statement-level rules. Assertions enforce database-wide invariants at commit.
+> Choose the simplest mechanism that expresses your rule.
+
+## 25. Triggers vs. Assertions — Comparison and Contrast
+
+Both triggers and assertions are **procedural** mechanisms for enforcing rules
+the database cannot express with simple declarative constraints. However, they
+differ in key dimensions:
+
+| Dimension | Triggers | Assertions |
+|---|---|---|
+| Scope | Row-level or statement-level | Database-wide (all tables) |
+| Timing | Fires on INSERT/UPDATE/DELETE | Evaluated at `COMMIT` time |
+| Granularity | Per-row or per-statement | Whole database state at once |
+| NEW / OLD access | Yes (row-level triggers) | No (no specific row context) |
+| Action | Arbitrary SQL (INSERT, UPDATE, logging, side-effect tables) | Predicate check only (pass/fail) |
+| When evaluated | At the moment the event occurs | At transaction commit |
+| Performance | Runs on every matching event | Runs once per commit per TX |
+| Error handling | Can signal, modify, or redirect | Rejects the `COMMIT` entirely |
+
+**When to use triggers:**
+- You need to audit changes (log old → new values).
+- You need to modify other tables as a side effect.
+- You need per-row validation or derived values.
+- The rule depends on the specific rows being inserted/updated/deleted.
+
+**When to use assertions:**
+- The rule spans multiple tables and must always hold.
+- You want a single, declarative predicate checked atomically at commit.
+- You do not need side effects — just "is the database still valid?"
+
+**Example** — "a student's GPA must never exceed 4.0":
+
+**Trigger approach** (per-row, during INSERT/UPDATE):
+
+```sql
+CREATE TRIGGER check_gpa
+BEFORE INSERT ON Enrollments
+FOR EACH ROW
+BEGIN
+  IF NEW.gpa > 4.0 THEN
+    SIGNAL SQLSTATE '45000'
+    SET MESSAGE_TEXT = 'GPA cannot exceed 4.0';
+  END IF;
+END;
+```
+
+**Assertion approach** (database-wide, at COMMIT):
+
+```sql
+CREATE ASSERTION max_gpa
+CHECK (
+  NOT EXISTS (
+    SELECT 1 FROM Enrollments
+    WHERE gpa > 4.0
+  )
+);
+```
+
+The trigger catches the bad row *immediately* (before it is even inserted).
+The assertion catches it *at commit* — a batch `INSERT` of 100 rows where one
+has `gpa > 4.0` would succeed per-row but fail at `COMMIT`, rolling back all 100
+rows.
+
+**Shared characteristics:**
+- Both are **procedural extensions** to declarative SQL.
+- Both can be expensive: triggers fire on every event; assertions scan the
+  database at commit.
+- Both enforce rules that simple `CHECK` / `UNIQUE` / `FOREIGN KEY` cannot.
+- Both are part of the schema (persist until dropped).
+
+> **Key takeaway:** Triggers react per-event (row or statement), have access to
+> `NEW`/`OLD`, and can perform arbitrary actions. Assertions evaluate a
+> database-wide predicate at commit time and either accept or reject the entire
+> transaction. Use triggers for granular, side-effect-heavy rules; use
+> assertions for holistic, always-true invariants.
+
+**Arrow summary — choosing the right tool:**
+
+```text
+Rule spans one table?
+  |
+  Yes v                   No v
+  Can a CHECK do it?      Rule spans multiple tables?
+  |                        |
+  Yes → use CHECK        Yes v
+  No  → use TRIGGER       use ASSERTION (if supported)
+                          or TRIGGER (as a fallback)
+```
