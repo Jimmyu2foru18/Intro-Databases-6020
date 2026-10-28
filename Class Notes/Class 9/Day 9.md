@@ -543,7 +543,291 @@ flowchart TD
 
 ---
 
-## 13. Indexing and Storage: The Full Lookup Path
+## 13. Clustered vs. Unclustered Indexes
+
+An index is **clustered** if the index's key order matches the order in which
+the data rows are physically stored on disk. It is **unclustered** (non-clustered)
+if the data rows are stored in a different physical order than the index.
+
+### Clustered Index — Data Follows Index Order
+
+```mermaid
+flowchart LR
+    subgraph Clustered["Clustered Index"]
+        direction TB
+        C1["Index keys: [3, 7, 12, 19, 25, 30, 35]"]
+        C2["Data rows:  [3, 7, 12, 19, 25, 30, 35]"]
+        C3["Physical order matches index order"]
+    end
+    C1 --> C2
+    C2 --> C3
+```
+
+The leaf pages of a clustered B+ tree **contain the actual data rows**. No
+separate lookup is needed — the index IS the table.
+
+### Unclustered Index — Data Follows a Separate Order
+
+```mermaid
+flowchart LR
+    subgraph Unclustered["Unclustered (Secondary) Index"]
+        direction TB
+        U1["Index keys: [3, 7, 12, 19, 25, 30, 35]"]
+        U2["Data rows:  [25, 3, 30, 7, 12, 19, 35]"]
+        U3["Leaf entries: key + RID"]
+        U4["Extra lookup via RID"]
+    end
+    U1 --> U2
+    U2 --> U3
+    U3 --> U4
+```
+
+The leaf pages of an unclustered B+ tree contain **key + RID pointers**.
+Finding the actual data row requires a second random I/O.
+
+### Lookup Path Comparison
+
+```mermaid
+flowchart TD
+    A["SQL: SELECT * FROM Employees WHERE zip = 15213"] --> B["Query optimizer chooses index on [zip]"]
+
+    subgraph ClusteredLookup["Clustered Index Lookup"]
+        C1["B+ tree on zip"]
+        C2["Leaf page contains\nactual data rows"]
+        C3["Return row directly\n(no extra I/O)"]
+        C1 --> C2 --> C3
+    end
+
+    subgraph UnclusteredLookup["Unclustered Index Lookup"]
+        U1["B+ tree on zip"]
+        U2["Leaf entry: (15213 → RID: page=105, slot=3)"]
+        U3["Follow RID to\ndata page 105"]
+        U4["Fetch actual row\n(extra random I/O)"]
+        U1 --> U2 --> U3 --> U4
+    end
+
+    A --> ClusteredLookup
+    A --> UnclusteredLookup
+```
+
+### Clustered vs. Unclustered Comparison
+
+| Property        | Clustered                     | Unclustered                    |
+|-----------------|-------------------------------|--------------------------------|
+| Physical order  | Data sorted by index key      | Data in arbitrary order        |
+| Leaf content    | Actual data rows              | Key + RID pointer              |
+| # per table     | One (data sorted one way)     | Many (each index is independent) |
+| Range scan      | Very fast (sequential I/O)    | Slower (random I/O via RIDs)   |
+| Storage overhead| None                          | Extra B+ tree                  |
+| Insert overhead | May cause page splits         | Minimal (index-only)           |
+| Lookup cost     | O(log n) — data at leaf       | O(log n) + extra page fetch    |
+
+### Architecture Diagram
+
+```mermaid
+flowchart LR
+    subgraph Disk["On-Disk Layout"]
+        direction TB
+        D1["Clustered B+ Tree"]
+        D2["Root\nInternal nodes\nLeaf = data rows"]
+        D3["Unclustered B+ Tree"]
+        D4["Root\nInternal nodes\nLeaf = key + RID"]
+        D5["Data pages (separate)"]
+    end
+    D1 --> D2
+    D3 --> D4
+    D4 -.->|"Follow RID"| D5
+    style D2 fill:#e8f5e9
+    style D4 fill:#fff3e0
+```
+
+> **Key takeaway:** A clustered index stores data rows in the same physical
+> order as the index, making range scans extremely efficient at the cost of write
+> overhead and limiting the table to one clustered index. An unclustered index
+> stores RIDs in the leaf, allowing many indexes per table but requiring an extra
+> random I/O per lookup to fetch the actual data page.
+
+### Clustering Key Selection
+
+The choice of which column (or set of columns) becomes the clustered index key
+has a lasting impact on performance. A good clustering key is **stable** (rarely
+updated), **narrow**, **unique**, and supports common range or sort patterns.
+
+| Criterion        | Why it matters                                                         | Good examples      | Bad examples       |
+|---|---|:---:|:---:|
+| Stable           | Updates to the key force the row to physically move, causing page splits and expensive writes | Order date, customer ID | Status flags, timestamps updated on every edit |
+| Narrow           | The key is stored in **every** unclustered (secondary) index entry, so wide keys bloat all secondary indexes | Single INT, SMALLINT | Wide VARCHAR, composite keys with long strings |
+| Unique           | If the key is not unique, the DBMS adds a hidden row-id (e.g., `_rowid` or `ctid`) to every secondary index entry, adding an extra lookup | INT primary key, auto-increment | Duplicate values, non-unique composite keys |
+| Sort/range-friendly | Range queries and ORDER BY clauses that match the clustering key scan sequentially | Date ranges, auto-increment IDs | High-cardinality random keys like UUID |
+
+```mermaid
+flowchart TD
+    A["Choose clustering key"] --> B{"Stable & narrow?"}
+    B -->|"No"| C["Bad key: updates cause\npage splits & index bloat"]
+    B -->|"Yes"| D{"Supports range\nqueries & ORDER BY?"}
+    D -->|"Yes"| E["Good key: fast range\nscans, cheap secondary indexes"]
+    D -->|"No"| F["Acceptable, but\nconsider query patterns"]
+```
+
+### SQL Syntax for Clustered and Unclustered Indexes
+
+Different database systems expose clustered indexing differently. Here are the
+common patterns:
+
+**PostgreSQL** — no explicit `CLUSTERED` keyword on `CREATE INDEX`, but supports
+the standalone `CLUSTER` command to physically reorder an existing table:
+
+```sql
+-- Re-cluster an existing table on an index
+CLUSTER Employees USING idx_zip_code;
+
+-- Or cluster in place (no separate index needed for PK)
+CLUSTER Employees USING Employees_pkey;
+
+-- Note: CLUSTER must be re-run periodically as data changes
+```
+
+**SQL Server** — explicit `CLUSTERED` / `NONCLUSTERED` keywords:
+
+```sql
+-- Clustered index: data rows stored in order of zip_code
+CREATE CLUSTERED INDEX ix_zip_clustered
+ON Employees(zip_code);
+
+-- Nonclustered index: leaf stores RIDs
+CREATE NONCLUSTERED INDEX ix_name_unclustered
+ON Employees(last_name);
+
+-- A table can have at most 1 clustered index
+```
+
+**MySQL (InnoDB)** — the **primary key** is always the clustered index. No
+explicit keyword needed:
+
+```sql
+-- InnoDB automatically clusters data on the primary key
+CREATE TABLE Employees (
+    id       INT PRIMARY KEY,        -- clustered index (data lives in B+ tree leaves)
+    zip_code CHAR(5),
+    last_name VARCHAR(50),
+    INDEX ix_zip (zip_code),          -- secondary, unclustered index
+    INDEX ix_name (last_name)         -- secondary, unclustered index
+);
+```
+
+**MySQL (MyISAM / older engines)** — no clustered indexes; all indexes are
+unclustered (leaf stores row pointer).
+
+### Database-Specific Notes
+
+| DBMS          | Clustered index support | Default clustered key | Notes |
+|---|---|:---:|---|
+| PostgreSQL    | Via `CLUSTER` command (manual, one-time) | None (heap-organized by default) | Table is a heap; `CLUSTER` reorders once. Use `pg_repack` for online reorganization. |
+| SQL Server    | Explicit `CLUSTERED` / `NONCLUSTERED` | First column of PK (if defined as CLUSTERED) | Exactly one clustered index per table; secondary indexes store the clustering key instead of a RID. |
+| MySQL InnoDB  | Always clustered on PK | The `PRIMARY KEY` | Secondary indexes store the PK value (not a RID), adding a lookup step. If no PK, InnoDB picks a hidden `row_id`. |
+| MySQL MyISAM    | None | N/A | All indexes are unclustered; leaf entries store file offsets. |
+| Oracle          | Index-organized tables (IOT) | Configurable | `CREATE TABLE ... ORGANIZATION INDEX` makes the table clustered. Otherwise heap-organized. |
+
+### Secondary Indexes on Clustered Tables
+
+An important subtlety: on a table that has a clustered index, **secondary
+(unclustered) indexes do not store a physical RID**. Instead, they store the
+**clustering key** of the primary row. This means a secondary index lookup
+requires two steps:
+
+```mermaid
+flowchart TD
+    A["SQL: SELECT last_name FROM Employees\nWHERE zip_code = 15213"] --> B["Secondary index on zip_code"]
+    B --> C["Leaf entry: zip=15213 → PK id=42"]
+    C --> D["Follow PK id=42 to clustered\nB+ tree leaf (actual row)"]
+    D --> E["Return row to execution engine"]
+```
+
+```text
+Step 1: Secondary index lookup    O(log n)
+  zip_code = 15213  →  PK = 42
+
+Step 2: Clustered index lookup    O(log n)
+  PK = 42  →  actual data row
+
+Total: 2 B+ tree traversals per secondary-index lookup
+```
+
+> **Key takeaway:** On a clustered table, secondary indexes use the clustering
+> key (not a physical RID) as the pointer. Each secondary lookup is a two-step
+> B+ tree traversal. This is why choosing a **narrow, stable** clustering key
+> matters for secondary index size.
+
+### Fragmentation and Page Splits
+
+A clustered index keeps rows in sorted order, but **inserts and updates can
+break** that order:
+
+- **Page splits** — when a new row must be inserted into a full leaf page, the
+  page is split in two. This is expensive: half the rows are moved, the parent
+  is updated, and the new pages may not be physically adjacent on disk.
+- **External fragmentation** — pages become scattered across the disk, breaking
+  sequential I/O.
+- **Internal fragmentation** — pages are only partially full after splits,
+  wasting space and reducing fan-out.
+
+```mermaid
+flowchart LR
+    subgraph Before["Before insert (page full)"]
+        B1["Page N: [10, 12, 14, 16, 18] — FULL"]
+    end
+    subgraph After["After page split (insert 13)"]
+        A1["Page N: [10, 12]"]
+        A2["Page N+1: [13, 14, 16, 18]"]
+        A1 -. "physically\nseparate?" -. A2
+    end
+```
+
+| Maintenance strategy | What it does | Trade-off |
+|---|---|---|
+| Fill factor    | Leave pages partially empty at creation to absorb inserts | Slower growth, but more wasted space |
+| Re-index / rebuild | Drop and recreate the index from scratch | Eliminates fragmentation; requires I/O + locks |
+| `CLUSTER` / `pg_repack` | Physically reorder rows on disk | One-time fix; must be repeated as data changes |
+| Auto-vacuum (PostgreSQL) | Marks dead tuples for reuse | Reclaims space gradually; does not compact |
+
+> **Key takeaway:** Clustered indexes are fast for range scans but costly to
+> maintain. Page splits cause both internal and external fragmentation. Periodic
+> re-indexing or clustering is needed to keep performance predictable.
+
+### When to Use Each Type
+
+```text
+Range query or ORDER BY?
+  |
+  Yes → Clustered index on that column (sequential I/O)
+  No  → Is the table mostly written?
+          |
+          Yes → Avoid clustering on a frequently-updated column
+          No  → Cluster on the most common query key
+
+Need many indexes on the same table?
+  |
+  → One clustered index (on the best range/sort key)
+  → Plus multiple unclustered indexes (for other search patterns)
+```
+
+| Workload                | Recommended approach |
+|---|---|
+| Range scans (`WHERE date BETWEEN ...`) | Clustered on `date` |
+| Frequent updates to the key | Unclustered (avoids page splits) |
+| Sequential inserts (append-only) | Clustered on an auto-increment key |
+| OLTP with random inserts | Cluster on an ever-increasing key (ID, timestamp) |
+| OLAP with large sorts | Clustered on the sort column |
+| Many secondary lookups | Keep the clustering key narrow and unique |
+
+> **Key takeaway:** Cluster on the column that benefits most from sequential I/O
+> (range scans, ORDER BY), keeping it stable, narrow, and unique. Use
+> unclustered indexes for everything else. When in doubt, cluster on an
+> auto-increment surrogate key — it's stable, narrow, and append-friendly.
+
+---
+
+## 14. Indexing and Storage: The Full Lookup Path
 
 When the database uses a B+ tree as an index, each leaf entry maps a **search
 key** to a **record ID (RID)**. The buffer pool manager then uses the RID to
@@ -577,7 +861,7 @@ flowchart LR
 
 ---
 
-## 14. I/O-Aware Search: Simple Scan vs. Binary Search
+## 15. I/O-Aware Search: Simple Scan vs. Binary Search
 
 Once a B+ tree node is in memory (loaded via the buffer pool), the database
 must search within that node's sorted keys to decide which child pointer to
@@ -622,7 +906,7 @@ flowchart TD
 
 ---
 
-## 15. Interaction with Disk I/O Patterns
+## 16. Interaction with Disk I/O Patterns
 
 Both scan and binary search operate on a single node that has already been
 loaded into memory. The difference is in **how quickly** the search converges
@@ -665,7 +949,7 @@ flowchart LR
 
 ---
 
-## 16. Block Size and Node Capacity
+## 17. Block Size and Node Capacity
 
 The choice between simple scan and binary search is tightly coupled to the
 **block size** (the unit of I/O the database reads from disk) and the **node
@@ -714,7 +998,7 @@ flowchart TB
 
 ---
 
-## 17. Memory Hierarchy: L1/L2 Cache, TLB, and Disk Prefetch
+## 18. Memory Hierarchy: L1/L2 Cache, TLB, and Disk Prefetch
 
 The performance of both search strategies is deeply affected by the memory
 hierarchy. Every level has different latency and capacity characteristics.
@@ -791,7 +1075,7 @@ flowchart TB
 
 ---
 
-## 18. Mapping the Concepts Together
+## 19. Mapping the Concepts Together
 
 Buffer management, MMAP, Pig, and KV indexing all sit along the path from code
 to storage. Here is how they relate:
@@ -838,7 +1122,7 @@ flowchart LR
 
 ---
 
-## 19. Buffer Management and Indexing Cheat Sheet
+## 20. Buffer Management and Indexing Cheat Sheet
 
 ### Buffer Management
 
@@ -887,6 +1171,20 @@ flowchart LR
 | Crossover point    | ~50–200 keys (scan wins below; binary above)                                |
 | SIMD scan          | Up to 16 keys per instruction; competitive for moderate n                   |
 | Disk prefetch      | Read-ahead helps when node data is accessed sequentially                    |
+
+### Clustered and Unclustered Indexes
+
+| Concept             | Rule / Formula                                                              |
+|---|---|
+| Clustered index     | Data rows stored in same physical order as index key; leaf = data           |
+| Unclustered index   | Leaf stores key + RID; data in arbitrary order                              |
+| # per table         | 1 clustered; many unclustered                                               |
+| Clustering key      | Choose: stable, narrow, unique, sort/range-friendly                         |
+| Secondary on clustered | Stores clustering key (not RID) → 2 B+ tree lookups                      |
+| Page split          | Inserts into full pages split nodes; causes fragmentation                   |
+| CLUSTER (PostgreSQL)| One-time physical reorder of table rows on disk                             |
+| CLUSTERED (SQL Server)| `CREATE CLUSTERED INDEX`; at most 1 per table                             |
+| InnoDB              | PK is always the clustered index; secondary indexes store PK value          |
 
 > **Key takeaway:** Buffer management is about moving pages between disk and
 > memory correctly (write-ahead log, no-force, steal). MMAP is an alternative
