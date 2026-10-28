@@ -1,0 +1,827 @@
+CLASS 9: BUFFER MANAGEMENT, MMAP, PIG, AND KEY-VALUE INDEXING
+=============================================================
+
+This class covers four topics that all share a central theme: how a database
+or data-processing system moves data between disk and memory, and how it
+reorganizes or accesses data for speed. We discuss buffer management (the
+database's own page cache), the pros and cons of using the OS's
+memory-mapped files (mmap), the Pig Latin dataflow language that runs on
+top of Hadoop and Hive, and how traditional indexes map to key-value stores.
+
+
+1. WHAT IS A BUFFER
+-------------------
+
+A **buffer** is a region of physical memory (RAM) used to store temporary
+data while it is being moved between a fast and a slow device — typically
+between disk and the CPU. In a database context, the buffer (or **buffer
+pool**) holds pages that have been read from disk and may be written back
+later.
+
+   Disk (slow, persistent)          Memory (fast, volatile)
+        |                                |
+        |  Read page                     |
+        v                                v
+   [Database File]              [Buffer Pool / Page Cache]
+        |                                |
+        |  Process data                  |
+        |                                |
+        |  Flush / Evict                 |
+        v                                v
+   [Updated data]              [Dirty page written back to disk]
+
+Key takeaway: A buffer is a temporary staging area in memory that lets the
+database avoid repeated, expensive disk reads and batch writes for efficiency.
+
+
+2. BUFFER OPERATIONS: READ, FLUSH, RELEASE
+------------------------------------------
+
+A simplified buffer in main memory operates over **pages** (fixed-size blocks)
+and **files**. The buffer manager supports three core operations:
+
+  Operation     What it means
+  ------------  -------------------------------------------------------
+  Read page     Load a page from disk into a free frame in the buffer
+                   pool.
+  Flush page    Evict a page from the buffer **and write its modified
+                   contents back to disk** (required when the page is dirty).
+  Release page  Evict a page from the buffer **without writing to disk**
+                   (safe only when the page is clean — unmodified).
+
+   Page on disk                    Buffer pool frame
+   [Page N: data]  --Read-->  [Frame: Page N, dirty=false]
+                          |
+                          | --Modify--> [Frame: Page N, dirty=true]
+                          |
+                          |-- Release (clean) --> frame freed, disk unchanged
+                          |
+                          |-- Flush (dirty) --> [Frame: Page N, dirty=false],
+                                                 disk = updated data
+
+Key takeaway: Every page in the buffer follows a lifecycle — read from disk,
+possibly modified, then either released (if clean) or flushed (if dirty) when
+it leaves the buffer.
+
+
+3. THE DATABASE OWNS ITS BUFFER
+-------------------------------
+
+The database maintains its **own buffer** rather than relying entirely on the
+operating system's page cache because it knows the access patterns of queries,
+transactions, and recovery.
+
+  Database buffer pool
+  |
+  | [Knows access patterns]
+  | [Predicts which pages to keep]
+  |
+  v
+  Better eviction decisions than generic OS policies
+
+Key takeaway: Because the database understands which pages are hot (frequently
+reused) and which are cold (scan-once), it can make smarter replacement
+decisions than a general-purpose OS page cache.
+
+
+4. BUFFER REPLACEMENT: WHY NOT FIFO OR LIFO?
+--------------------------------------------
+
+The database works **sequentially** — it evicts pages based on recency and
+frequency of access (e.g., LRU, Clock, or LRU-K), **not** on simple FIFO
+(First-In-First-Out) or LIFO (Last-In-First-Out) ordering.
+
+  FIFO / LIFO
+  |
+  | Ignores access patterns entirely
+  v
+  May evict hot pages too soon
+
+  LRU / Clock / LRU-K
+  |
+  | Uses access history
+  v
+  Keeps hot pages in memory
+
+Example — sequential flooding with FIFO:
+
+  Buffer pool capacity: 4 pages
+
+  Scan reads pages 1, 2, 3, 4, 5 (sequential scan).
+  FIFO evicts page 1 first.
+
+  If page 1 was a frequently accessed index root, it is now gone —
+  even though it is "hot."
+
+Key takeaway: Access-pattern-aware policies (LRU, Clock, LRU-K) outperform
+FIFO/LIFO because they keep recently and frequently used pages, avoiding the
+sequential-flooding problem.
+
+
+5. RECOVERY AND LOGGING REQUIRE FLUSHING TO DISK
+------------------------------------------------
+
+The buffer manager's ability to **flush** dirty pages to disk is essential for
+two ACID properties:
+
+  1. **Durability** — once a transaction commits, its changes must survive a
+     crash. The write-ahead log (WAL) is flushed before commit, and dirty data
+     pages are eventually flushed too.
+  2. **Correctness** — during recovery, the DBMS replays the log to redo
+     committed transactions and undo uncommitted ones. It must be able to
+     control exactly when dirty pages reach stable storage.
+
+   Transaction modifies buffer page (dirty = true)
+     |
+     | [WAL record] log is forced to disk BEFORE the data page
+     |
+     v
+   Page stays in buffer (no-force policy)
+     |
+     | [Background writer or checkpoint]
+     v
+   Dirty page is flushed to disk
+
+Key takeaway: The database must control flushing because correctness depends
+on the ordering of log records vs. data pages (the write-ahead rule) and on
+knowing which changes have reached stable storage.
+
+
+6. MMAP — AN ALTERNATIVE TO EXPLICIT BUFFER MANAGEMENT
+------------------------------------------------------
+
+**MMAP** (memory-mapped files) is a POSIX system call that maps a file on disk
+directly into a process's virtual address space. After the mapping, reading or
+writing to that memory region implicitly reads or writes the file.
+
+  File on disk
+      |
+      v
+  mmap() system call
+      |
+      v
+  Virtual address space (accessible as ordinary memory)
+      |
+      v
+  Physical RAM (page cache managed by the OS)
+
+Key takeaway: Mmap lets the OS handle page faults and eviction automatically —
+the application reads and writes pointers as if the file were in memory.
+
+
+7. SHOULD YOU USE MMAP IN YOUR DBMS?
+-----------------------------------
+
+This is a cautionary question: **are you sure you want to use mmap in your
+database?**
+
+The OS does not understand:
+  - SQL queries
+  - Transactions
+  - Page dependencies and access patterns
+  - Write-ahead logging ordering requirements
+  - Which pages are hot vs. scan-only
+
+As a result, the OS may evict a critical index page at the wrong time, or delay
+a required flush past commit.
+
+  Problem #1: OS controls eviction
+  |  Database cannot predict or control what the OS evicts.
+  v
+  Hot pages can be prematurely expelled.
+
+  Problem #2: Dirty page management
+  |  The OS may write dirty pages out of order.
+  v
+  WAL ordering can be violated; durability guarantees break.
+
+  Problem #3: Unpredictable faults
+  |  With mmap, a simple memory access can trigger a page fault and block.
+  v
+  Query workers stall on I/O unexpectedly.
+
+  Problem #4: Double buffering (the 100 GB page cache problem)
+  |  When mmap reads a file, the data is cached in the OS page cache.
+  |  The database ALSO maintains its own buffer pool.
+  v
+  The same page exists in TWO places in memory — wasting RAM.
+
+  Problem #5: No database-level I/O control
+  |  The database cannot reorder, batch, or prioritize I/O requests.
+  v
+  It cannot avoid random I/O or group nearby reads for sequential throughput.
+
+Example — double buffering with a 100 GB page cache:
+
+  Disk file (10 GB database)
+      |
+      | mmap() — OS reads into page cache
+      v
+  OS page cache (100 GB available)
+  [Page A] [Page B] [Page C] ...  (copy 1 — managed by the kernel)
+
+      |
+      | Database reads via pointer, copies into its own pool
+      v
+  Database buffer pool
+  [Page A] [Page B] [Page C] ...  (copy 2 — managed by the database)
+
+  The same 10 GB of data now occupies 20 GB of RAM. If the database allocated
+  80 GB for its own buffer pool, only 20 GB remains for other work — even
+  though 100 GB of physical RAM is available. The OS and the database fight
+  over the cache, and neither can see the other's decisions.
+
+  Page cache          Database buffer pool
+  |                   |
+  | Same pages        | Same pages (duplicate copy)
+  | OS decides        | Database decides
+  v                   v
+  Evict independently → Wasted RAM + conflicting eviction
+
+Key takeaway: Mmap is a powerful convenience but gives up control. Most
+production databases manage their own buffer pools and use explicit I/O rather
+than relying on the OS's virtual memory for durability-critical data — partly to
+avoid double buffering (the 100 GB page cache problem), and partly to preserve
+write-ahead logging, eviction, and I/O-scheduling guarantees.
+
+
+8. HOW MMAP WORKS — THE 7-STEP PROCESS
+--------------------------------------
+
+The flow from code to memory to disk when using mmap:
+
+  Step 1:  Application calls mmap() to map a file into virtual memory.
+  Step 2:  The OS creates a virtual-to-physical mapping and returns a pointer.
+  Step 3:  The application accesses the mapped memory address.
+  Step 4:  If the page is not in RAM, a major page fault occurs.
+  Step 5:  The OS blocks the process, reads the page from disk, and updates
+           the page table.
+  Step 6:  The process resumes and sees the correct data.
+  Step 7:  On a write, the OS marks the page dirty; it is flushed back to disk
+           later (governed by the OS, not the application).
+
+  Code     Memory         Disk
+  |        |              |
+  | mmap() |              |
+  |------->|              |
+  |        |              |
+  | Access |              |
+  |------->|              |
+  |        | Page fault?  |
+  |        |----> Read ---|
+  |        |              |
+  | Modify |              |
+  |------->|              |
+  |        | Write back --|
+  |        |              |
+
+Key takeaway: Mmap collapses the read/write path through the OS page cache, but
+the database forfeits fine-grained control over eviction and write ordering.
+
+
+9. PIG LATIN — DECLARATIVE DATAFLOW ON HADOOP
+---------------------------------------------
+
+**PIG** is a high-level platform for analyzing large datasets. It provides
+**Pig Latin**, a scripting language that expresses data transformations as a
+dataflow program. PIG runs on top of **Apache Hadoop** and integrates with
+**Apache Hive**.
+
+  Application
+  |
+  | Pig Latin script
+  v
+  PIG runtime
+  |
+  | Translates to map/reduce jobs
+  v
+  Hadoop MapReduce   (and/or Hive execution engine)
+  |
+  v
+  HDFS (Hadoop Distributed File System)
+
+Key takeaway: Pig Latin lets you write high-level transformations (LOAD, FILTER,
+GROUP, JOIN, STORE) without hand-coding MapReduce; the PIG runtime compiles
+them into distributed jobs.
+
+
+10. PIG DATA MODEL AND EMBEDDED JOIN PROCESSING
+-----------------------------------------------
+
+Pig Latin operates on **relations with schemas** (bags of tuples). A typical
+Pig Latin script looks like:
+
+  raw = LOAD 'input' USING TextLoader() AS (line:chararray);
+  parsed = FOREACH raw GENERATE FLATTEN(TOKENIZE(line)) AS word;
+  grouped = GROUP parsed BY word;
+  counts = FOREACH grouped GENERATE group AS word, COUNT(parsed) AS total;
+  STORE counts INTO 'output';
+
+**Embedded join processing** means that joins expressed in Pig Latin are
+compiled into efficient distributed join strategies (broadcast/replicate-join,
+merge-join, or hash-join) that run as part of the MapReduce pipeline. The
+Pig runtime decides which physical join to use based on data size and
+distribution.
+
+  Logical plan (Pig Latin)
+  |
+  | GROUP BY, JOIN, FILTER, etc.
+  v
+  Physical plan
+  |
+  | Map tasks + Reduce tasks
+  v
+  Distributed join (e.g., replicate-Join or merge-Join)
+
+Key takeaway: Pig Latin expresses joins declaratively, and the PIG execution
+engine chooses an appropriate distributed join algorithm — this is "embedded
+join processing."
+
+
+11. INDEXING TO KEY-VALUE STORAGE
+---------------------------------
+
+Traditional database indexes (B+ trees, hash indexes) map a **search key** to a
+**record identifier (RID)** or the record itself. In a key-value store, this
+concept is generalized: every indexed lookup becomes a `key → value` fetch.
+
+  Traditional index:
+  key (e.g., employee_id) → RID (page number, tuple offset)
+  |
+  v
+  Look up the actual tuple on the data page.
+
+  Key-value index:
+  key (e.g., employee_id) → value (the entire record or a pointer)
+
+  Storage engine
+  |
+  | Lookup by key
+  v
+  Key-value store (e.g., RocksDB, LevelDB, DynamoDB)
+  |
+  | key → value mapping
+  v
+  Return value
+
+This is how modern storage engines (including those embedded in databases)
+expose indexing: the B+ tree or LSM tree holds `key → value` pairs, and a
+range or point query is a range or point lookup on the key.
+
+  B+ Tree index
+  |
+  | Sorted keys, leaf pages linked
+  | Point query: O(log n)
+  | Range query: O(log n + k)
+  v
+  key → RID / value
+
+  LSM Tree (Log-Structured Merge)
+  |
+  | Sorted runs, memtable → immutable SSTables
+  | Optimized for writes: amortized O(1)
+  | Point/range query: multiple lookups merged
+  v
+  key → value
+
+Key takeaway: Indexing in key-value stores reduces to mapping a key to its
+value via B+ trees or LSM trees; understanding these structures bridges
+traditional database indexes and modern NoSQL/document stores.
+
+
+12. B+ TREES — THE WORKHORSE INDEX STRUCTURE
+--------------------------------------------
+
+The **B+ tree** is the most widely used index structure in production database
+systems. It is a balanced, multi-way search tree where all leaf nodes are at the
+same depth and contain the indexed keys (or key-to-RID pointers).
+
+  B+ Tree properties:
+  - Balanced: every root-to-leaf path has the same length.
+  - Sorted: keys within each node are in ascending order.
+  - High fan-out: each node can have many children (e.g., 100+), keeping the
+    tree shallow.
+  - Leaf nodes are linked: siblings are connected by pointers, enabling
+    efficient range scans.
+
+  Example B+ tree on keys [1, 2, 3, ..., 15] with internal node fan-out = 4:
+
+         [4, 8, 12]
+        /    |    |    \
+    [1,2,3] [4,5,6,7] [8,9,10,11] [12,13,14,15]
+       |          |        |            |
+   (leaf links)----->----->----->---- (leaf links)
+
+  Search for key = 7:
+  1. Start at root: 7 > 4, 7 <= 8 → go to middle child [4,5,6,7].
+  2. Found 7 in the leaf node.
+
+  Search for key = 6 (point query):
+  - O(log n) — follow one path from root to leaf, then scan the leaf.
+
+  Range query for keys 5 to 10:
+  1. Descend to the leaf containing 5: [4,5,6,7].
+  2. Scan forward through the leaf chain: [4,5,6,7] → [8,9,10,11].
+  3. Stop when key > 10.
+  - O(log n + k) where k is the number of results.
+
+  B+ Tree vs. B Tree:
+
+   Feature          B+ Tree                    B Tree
+   ---------------  -------------------------  -------------------------
+   Keys in leaf     Only in leaves             In internal + leaves
+   Data storage     Data (RIDs) in leaves      Data can be in internal nodes
+   Node capacity    Higher (more keys/leaf)    Lower (data in internal nodes)
+   Range scans      Excellent (linked leaves)  Slower (need in-order traversal)
+   Sequential I/O   Yes (clusters leaves)      No
+   Common use       Most DBMS (MySQL, PG)      filesystems (ReiserFS, NTFS)
+
+  Why B+ trees dominate databases:
+
+   1. High fan-out → fewer disk I/Os per search.
+   2. Linked leaves → efficient range scans and sorts.
+   3. Predictable O(log n) for point queries regardless of tree shape.
+   4. Bulk-loadable in O(n) time for initial construction.
+
+  Inserting into a B+ tree can cause a **node split** when a node overflows:
+
+   Before split (node has 4 max keys, inserting 6):
+   [3, 4, 5] + insert 6 → [3, 4, 5, 6]  (overflow!)
+
+   Split into two nodes:
+   [3, 4]   [5, 6]
+
+   Parent gains a new separator key:
+   Root: [4, 8, 12]   →   Root: [4, 5, 8, 12]  (or re-split if parent overflows)
+
+  Deleting from a B+ tree can cause a **node merge** or **redistribution** when
+  a node underflows below the minimum occupancy threshold.
+
+   Key takeaway: B+ trees provide O(log n) point lookups and O(log n + k) range
+   queries with balanced, shallow trees and linked leaf nodes — making them ideal
+   for both OLTP (fast point lookups) and OLAP (range scans) workloads.
+
+
+13. INDEXING AND STORAGE UNDER THE HOOD
+----------------------------------------
+
+When the database uses a B+ tree as an index, each leaf entry typically maps a
+**search key** to either a **record ID (RID)** or to the full record itself.
+
+  Index lookup path:
+
+   SQL query: SELECT * FROM Employees WHERE id = 42;
+   |
+   v
+   Parse → Query plan selects index [id]
+   |
+   v
+   B+ tree point lookup: id = 42
+   |
+   | O(log n) descent from root to leaf
+   v
+   Leaf node entry: (42 → RID: page=105, slot=3)
+   |
+   v
+   Buffer manager: is page 105 in the buffer pool?
+   |
+   | If not → read page from disk into a frame
+   v
+   Fetch tuple at page=105, slot=3
+   |
+   v
+   Return the record to the execution engine
+
+  This shows how indexing and buffer management are coupled: even after the
+   index finds the right key in O(log n) time, the database still needs the
+   buffer pool to locate the actual data page.
+
+   Arrow summary — the full lookup path:
+
+   SQL query
+     |
+     v
+   Query optimizer (chooses index)
+     |
+     v
+   B+ tree index (key → RID)
+     |
+     v
+   Buffer pool manager (RID → page in memory)
+     |
+     v
+   Disk (if page not in buffer)
+     |
+     v
+   Execution engine receives the tuple
+
+Key takeaway: Indexes (B+ trees) tell the database WHERE a record is (via RIDs);
+the buffer pool manager then ensures the right page is in memory. Both layers
+work together to minimize disk I/O.
+
+
+14. I/O-AWARE SEARCH: SIMPLE SCAN VS. BINARY SEARCH
+----------------------------------------------------
+
+Once a B+ tree node is in memory (loaded via the buffer pool), the database must
+search within that node's sorted keys to decide which child pointer to follow.
+Two fundamental strategies exist, each with different I/O characteristics:
+
+  1. **Simple (linear) scan** — check every key in the node from left to right.
+  2. **Binary search** — repeatedly halve the search interval using comparisons.
+
+The choice between them depends on the interaction between the node's key count,
+the block size, and the memory hierarchy (CPU cache, TLB, disk prefetch).
+
+  Simple scan
+  |
+  | For each key in node:
+  |   compare with target
+  |   if >= target → stop
+  v
+  Found position
+
+  Binary search
+  |
+  | lo = 0, hi = n-1
+  | While lo <= hi:
+  |   mid = (lo + hi) / 2
+  |   compare key[mid] with target
+  |   if target < key[mid] → hi = mid - 1
+  |   if target > key[mid] → lo = mid + 1
+  |   if equal → found
+  v
+  Found position in O(log n) node-internal comparisons
+
+
+15. INTERACTION WITH DISK I/O PATTERNS
+--------------------------------------
+
+Both scan and binary search operate on a single node that has already been
+loaded into memory. The difference is in **how quickly** the search converges
+and how that affects downstream I/O behavior.
+
+  Loading the node from disk:
+
+   Disk
+     |
+     | One page read (e.g., 4 KB block)
+     v
+   Buffer pool frame (already in memory for repeated traversals)
+
+  For a **simple scan**, the CPU reads keys sequentially. Sequential memory access
+  is friendly to CPU prefetchers and cache lines — consecutive keys are likely
+  already in the same cache line.
+
+  For a **binary search**, the CPU jumps to the middle, then to a quarter, etc.
+  These non-sequential accesses can cause cache misses, especially on small
+  nodes where the entire node fits in one or two cache lines.
+
+  Cache behavior comparison:
+
+   Simple scan on 4 KB node (one cache line):
+   |
+   | Keys: [1, 2, 3, 4, ..., 50]
+   | All in same cache line → sequential reads = fast
+   v
+   ~1 cache miss (if node not loaded yet)
+
+   Binary search on same 4 KB node:
+   |
+   | Jump to key[25] → key[12] → key[6] → key[3]
+   | Non-sequential jumps → potential cache misses
+   v
+   Up to log₂(50) ≈ 6 cache misses in worst case
+
+  Key insight: When the node fits in **one or two cache lines**, the simple scan
+  often wins because all keys are already cached after the first access. Binary
+  search's logarithmic advantage only matters when n is large enough that log₂(n)
+  comparisons save more than the cost of cache misses.
+
+Key takeaway: For small nodes (few keys, fits in 1-2 cache lines), linear scan
+can outperform binary search due to cache locality. For large nodes, binary
+search's O(log n) comparisons typically dominate.
+
+
+16. BLOCK SIZE AND NODE CAPACITY
+-------------------------------
+
+The choice between simple scan and binary search is tightly coupled to the
+**block size** (the unit of I/O the database reads from disk) and the **node
+capacity** (how many keys fit in one node).
+
+  Typical values:
+
+  Block / page size:            4 KB  (most DBMSs: PostgreSQL, MySQL InnoDB)
+                                8 KB  (some configurations)
+                                16 KB (Oracle, some PostgreSQL installs)
+
+  Key size (integer, 4 bytes):  4 bytes key + 8 bytes RID/pointer ≈ 12 bytes
+  Keys per 4 KB node:           ~341 keys (4096 / 12)
+  Keys per 8 KB node:           ~682 keys (8192 / 12)
+  Keys per 16 KB node:          ~1365 keys (16384 / 12)
+
+  Decision boundary:
+
+  Simple scan cost:   n comparisons (sequential, cache-friendly)
+  Binary search cost: log₂(n) comparisons (non-sequential, cache-hostile)
+
+  The crossover point depends on cache line size and miss penalty:
+
+   If n <= ~50-100 and node fits in 1-2 cache lines:
+     Simple scan is usually faster (fewer cache misses)
+
+   If n > ~200 and node spans multiple cache lines:
+     Binary search is usually faster (fewer total comparisons)
+
+  Example — node with 341 keys (4 KB page, 12 bytes/key):
+
+   Simple scan:
+   - 341 comparisons in the worst case
+   - But sequential, likely all in 4-8 cache lines
+   - Cache hit after first line load: ~341 cheap comparisons
+
+   Binary search:
+   - log₂(341) ≈ 9 comparisons in the worst case
+   - But 9 random accesses across 4-8 cache lines
+   - Each miss costs ~100-300 cycles, but only 9 comparisons
+
+   On modern hardware, for n ≈ 341, binary search usually wins due to the
+   378x reduction in comparisons, UNLESS the node is already fully cached
+   (e.g., in a hot buffer pool).
+
+Key takeaway: Block size and key size determine node capacity. Binary search
+wins for large nodes (>200 keys); simple scan wins for small nodes (≤100 keys)
+or when the node is already cached.
+
+
+17. MEMORY HIERARCHY: L1/L2 CACHE, TLB, AND DISK PREFETCH
+---------------------------------------------------------
+
+The performance of both search strategies is deeply affected by the memory
+hierarchy. Every level has different latency and capacity characteristics.
+
+  Latency numbers every engineer should know (approximate):
+
+  Operation                Latency
+  ------------------------ ---------
+  L1 cache reference       ~1 ns
+  L2 cache reference       ~4 ns
+  L3 cache reference       ~12 ns
+  Main memory reference    ~100 ns
+  SSD random read          ~100 µs
+  HDD random seek          ~10 ms
+
+  Memory hierarchy traversal for a B+ tree node lookup:
+
+   CPU registers
+     |
+     | L1 cache (~32 KB, ~1 ns)
+     v
+   L2 cache (~256 KB, ~4 ns)
+     |
+     | L3 cache (~8 MB, ~12 ns)
+     v
+   Main memory / RAM (~100 ns)
+     |
+     | Buffer pool (pages already in RAM)
+     v
+   Disk (~100 µs for SSD, ~10 ms for HDD)
+
+  How this affects search strategy:
+
+   1. CPU cache effects:
+      - Simple scan's sequential access pattern is ideal for CPU prefetchers.
+      - Binary search's jumps can defeat prefetching, but with only ~9 jumps
+        for a 341-key node, the penalty is modest if the node is in cache.
+
+   2. TLB (Translation Lookaside Buffer) effects:
+      - The TLB maps virtual addresses to physical addresses.
+      - Simple scan accesses memory sequentially → TLB entries are reused.
+      - Binary search accesses non-sequential locations → TLB misses may occur.
+      - On 4 KB pages, a 4 KB node fits in exactly one TLB entry.
+
+   3. Disk prefetch effects:
+      - When a node is first loaded from disk, the OS/database may issue
+        read-ahead (prefetch) for adjacent pages.
+      - This is most useful when the node's data will be scanned sequentially.
+      - For B+ tree leaf chains (range scans), prefetching the next leaf page
+        is beneficial. For binary search within internal nodes, prefetch helps
+        bring the whole node into cache before the search starts.
+
+   4. SIMD (Single Instruction, Multiple Data):
+      - Modern CPUs can compare 8 or 16 integers in a single instruction.
+      - A SIMD-based simple scan can check 8-16 keys at once, making linear
+        scan competitive or superior even for moderate n.
+      - Example: scanning 341 keys with AVX-512 (16 × 32-bit integers per
+        instruction) = ~22 SIMD comparisons, which may be faster than binary
+        search's 9 scalar comparisons with cache misses.
+
+Key takeaway: The memory hierarchy (L1/L2 cache, TLB, prefetch) favors
+sequential access. For nodes already in cache, simple scan with SIMD can beat
+binary search. Binary search is better when the node spans cache lines and
+the node is not resident, because it reduces the number of cache line loads.
+
+
+18. MAPPING THE CONCEPTS TOGETHER
+---------------------------------
+
+Buffer management, MMAP, Pig, and KV indexing all sit along the path from
+code to storage. Here is how they relate:
+
+  Application code
+  |
+  | Pig Latin / SQL
+  v
+  Execution engine
+  |
+  | Embedded join processing (chooses join algorithm)
+  v
+  Query plan (uses indexes / key-value lookups)
+  |
+  | Key-value index lookup
+  v
+  Storage engine (B+ tree or LSM tree)
+  |
+  | Read/write pages
+  v
+  Buffer pool manager
+  |
+  | Read page from disk, flush page, release page
+  v
+  Disk file (possibly mmap'd by the OS)
+
+Arrow summary:
+
+  Disk file
+      |
+      | mmap() — OS-managed virtual mapping
+      |      vs.
+      | explicit read/write + database buffer pool
+      v
+  Memory pages
+      |
+      | Buffer replacement: LRU / Clock (NOT FIFO or LIFO)
+      v
+  Execution engine
+      |
+      | Embedded join + KV index lookup
+      v
+  Pig Latin / SQL
+
+Key takeaway: Whether data flows through an OS-managed mmap region or through a
+database-managed buffer pool, and whether indexes are B+ trees or LSM trees,
+the goal is always the same: minimize expensive disk I/O and keep the right
+data in memory at the right time.
+
+
+19. BUFFER MANAGEMENT CHEAT SHEET
+----------------------------------
+
+  Concept               Rule / Formula
+  Buffer               Region of memory storing temporary data (pages)
+  Read page            Load a page from disk into a free buffer frame
+  Flush page           Evict a dirty page — write its contents to disk first
+  Release page         Evict a clean page — no disk write needed
+  Dirty page           Page modified in memory but not yet written to disk
+  Write-ahead rule     Log record must be on stable storage before the
+                        data page is flushed to disk
+  No-force             Database need not flush dirty pages before COMMIT
+                       (only the log is forced)
+  Steal              Buffer manager may evict dirty pages of uncommitted
+                        transactions (requires undo logging)
+  LRU                  Evict the least recently used page
+  Clock                Approximate LRU using a reference bit
+  LRU-K                Uses K-th most-recent access for better decisions
+  Sequential flooding  Large scans can evict hot pages under naive LRU
+  Pin count            Number of active users — page cannot be evicted if > 0
+
+  MMAP
+  mmap()               Maps a file into the process's virtual address space
+  Major page fault     Triggered when the requested page is not yet in RAM
+  Caution              OS does not know SQL, transactions, or WAL ordering
+  fsync()              Forces dirty mappings to stable storage
+
+  PIG / Pig Latin
+  Pig Latin            Declarative dataflow language (LOAD, FILTER, GROUP,
+                        JOIN, FOREACH, STORE)
+  Embedded join        Pig compiles joins to distributed map/reduce join algos
+  Runs on              Apache Hadoop (MapReduce) and integrates with Hive
+
+   Key-value indexing
+   Key-value store      Maps key → value (B+ tree or LSM tree backend)
+   B+ Tree              Sorted keys; O(log n) point, O(log n + k) range
+   LSM Tree             Sorted runs + memtable; fast writes, slower reads
+   Simple scan          O(n) comparisons; sequential, cache-friendly
+   Binary search        O(log n) comparisons; non-sequential, cache-hostile
+   Crossover point      ~50-200 keys (scan wins below; binary above)
+   SIMD scan            Up to 16 keys per instruction; competitive for moderate n
+   Disk prefetch        Read-ahead helps when node data is accessed sequentially
+
+Key takeaway: Buffer management is about moving pages between disk and memory
+correctly (write-ahead log, no-force, steal). MMAP is an alternative that
+trades control for convenience. Pig Latin and key-value indexes are higher-level
+abstractions that ultimately rely on efficient buffer and storage management
+underneath. I/O-aware search within B+ tree nodes — choosing simple scan or
+binary search based on node size, block size, and cache behavior — is a critical
+optimization for minimizing CPU cycles and cache misses per lookup.
