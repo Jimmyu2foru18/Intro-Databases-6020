@@ -1194,3 +1194,414 @@ flowchart LR
 > dominant index structure, and choosing between simple scan and binary search
 > within tree nodes depends on block size, node capacity, and memory hierarchy
 > behavior.
+
+---
+
+## 21. External Merge Sort
+
+When the data to be sorted does not fit in main memory, a database or
+data-processing system must sort using **external sorting** — the data lives on
+disk and is streamed through memory in chunks. **External merge sort** is the most
+general external sorting algorithm, and it builds directly on the buffer and I/O
+concepts discussed throughout these notes: disk I/O dominates, pages move through
+the buffer pool, and the goal is always to minimize expensive reads and writes.
+
+### Concept Overview
+
+The core challenge is **merging large files when memory is limited**. The input
+files may be far larger than available RAM, so the algorithm processes data in
+**pages** or **runs** that are small enough to fit in memory.
+
+**Disk I/O (read and write) is the dominant factor in performance.** CPU
+comparisons are essentially free by comparison — a single disk seek costs millions
+of CPU cycles. The algorithm therefore aims to **minimize the number of passes**
+over the data and to make every I/O count.
+
+### Algorithmic Parameters
+
+Every external merge operation is defined by three parameters:
+
+| Parameter        | Description                                                                    |
+|------------------|-------------------------------------------------------------------------------|
+| **Input**        | Two sorted input files (runs) of sizes M and N records respectively.          |
+| **Output**       | A single sorted output file containing all M + N records, written to disk.    |
+| **Requirements** | Memory must hold at least **three pages**: one per input run, plus one output buffer. |
+
+### Complexity Analysis
+
+The I/O cost of merging two sorted runs is expressed as **2(M + N)**:
+
+- **M + N reads** — every record from both input files must be read at least once.
+- **M + N writes** — every record must be written to the output file.
+
+Total I/O = (M + N) reads + (M + N) writes = **2(M + N)**.
+
+```text
+I/O breakdown:
+
+  Input file A: [a_1, a_2, ..., a_M]      →  M reads
+  Input file B: [b_1, b_2, ..., b_N]      →  N reads
+  Output file:  [c_1, c_2, ..., c_{M+N}]   →  M + N writes
+
+                      M reads + N reads + (M + N) writes
+                           = 2(M + N) I/O operations
+```
+
+> **Note:** This is the cost of a **single merge pass**. A full external sort
+> compounds this factor by the number of merge passes, but each pass still costs
+> 2(M + N).
+
+### Core Logic — Merging Sorted Sequences
+
+The merge operation relies on a fundamental invariant: **both input sequences are
+already sorted**. If the first input has
+$a_1 \leq a_2 \leq \dots \leq a_M$ and the second has
+$b_1 \leq b_2 \leq \dots \leq b_N$, the merged output
+$c_1 \leq c_2 \leq \dots \leq c_{M+N}$ can be produced by a single
+left-to-right comparison walk:
+
+```text
+  a_1 ≤ a_2 ≤ ... ≤ a_M         b_1 ≤ b_2 ≤ ... ≤ b_N
+         \                      /
+          \   Compare heads   /
+           \                  /
+            v                v
+          c_1 ≤ c_2 ≤ ... ≤ c_{M+N}
+```
+
+At each step, the smaller of the two current heads is appended to the output, and
+the corresponding input advances by one. Because each sequence is sorted, once an
+element is chosen it can never be overtaken by a later element from the same
+sequence — the pointer never backtracks.
+
+### Visual Representation — Step-by-Step Merge
+
+Consider merging two sorted runs:
+
+- **Run A** = `[3, 7, 12, 20]` (M = 4)
+- **Run B** = `[1, 5, 15, 25, 30]` (N = 5)
+
+```text
+Step 1:  A:[3, 7, 12, 20]     B:[1, 5, 15, 25, 30]   Output:[]
+           ↑                    ↑
+         Compare 3 vs 1 → 1 smaller, append to output
+
+Step 2:  A:[3, 7, 12, 20]     B:[1, 5, 15, 25, 30]   Output:[1]
+                  ↑                  ↑
+            Compare 3 vs 5 → 3 smaller, append to output
+
+Step 3:  A:[3, 7, 12, 20]     B:[1, 5, 15, 25, 30]   Output:[1, 3]
+                    ↑                    ↑
+              Compare 7 vs 5 → 5 smaller, append to output
+
+Step 4:  A:[3, 7, 12, 20]     B:[1, 5, 15, 25, 30]   Output:[1, 3, 5]
+                      ↑                      ↑
+                Compare 7 vs 15 → 7 smaller, append to output
+
+  ... continue until both runs are exhausted ...
+
+Final:  Output:[1, 3, 5, 7, 12, 15, 20, 25, 30]
+```
+
+#### Merge Process Diagram
+
+```mermaid
+flowchart TD
+    subgraph TwoRuns["Two Sorted Runs (on disk)"]
+        RA["Run A<br/>a_1 ≤ a_2 ≤ ... ≤ a_M"]
+        RB["Run B<br/>b_1 ≤ b_2 ≤ ... ≤ b_N"]
+    end
+
+    subgraph InMem["In-Memory Buffers"]
+        BA["Buffer A<br/>head = a_i"]
+        BB["Buffer B<br/>head = b_j"]
+        OB["Output buffer<br/>c_1, c_2, ..."]
+    end
+
+    subgraph DiskOut["Output File (on disk)"]
+        OUT["Merged output<br/>c_1 ≤ c_2 ≤ ... ≤ c_{M+N}"]
+    end
+
+    RA -- "read page" --> BA
+    RB -- "read page" --> BB
+    BA <-->|"compare a_i, b_j"| BB
+    BA -->|"append smaller"| OB
+    BB -->|"append smaller"| OB
+    OB -- "flush when<br/>buffer full" --> OUT
+
+    style RA fill:#e3f2fd
+    style RB fill:#e3f2fd
+    style OUT fill:#e8f5e9
+```
+
+#### Merge Algorithm Flow
+
+```mermaid
+flowchart LR
+    A["Start<br/>i = 0, j = 0"] --> B{"i < M<br/>AND j < N?"}
+    B -- "Yes" --> C["Compare a[i] vs b[j]"]
+    C --> D{"a[i] ≤ b[j]?"}
+    D -- "Yes" --> E["Append a[i] to output<br/>i = i + 1"]
+    D -- "No" --> F["Append b[j] to output<br/>j = j + 1"]
+    E --> B
+    F --> B
+    B -- "No" --> G["Append remaining<br/>elements from non-empty run"]
+    G --> H["Done — M+N records merged<br/>2(M+N) I/Os total"]
+```
+
+### Full External Sort Pipeline
+
+Merging two runs is one step. A complete external sort operates in two phases:
+
+```mermaid
+flowchart TD
+    A["Phase 1: Sort (in-memory)"] -->|"Read chunks of size M that fit<br/>in RAM. Sort each in memory.<br/>Write sorted run to disk."| B["Sorted runs:<br/>R_1, R_2, ..., R_r"]
+    B --> C["Phase 2: Merge (on disk)"]
+    C -->|"Repeatedly merge k sorted runs<br/>at a time, each pass costing<br/>2(M+N) I/Os. Write merged<br/>output back to disk."| D["Single fully sorted<br/>output file"]
+
+    style A fill:#fff3e0
+    style C fill:#fff3e0
+    style D fill:#e8f5e9
+```
+
+| Phase           | What happens                                              | I/O cost                |
+|-----------------|-----------------------------------------------------------|-------------------------|
+| **Sort phase**  | Read each chunk from disk; sort in memory; write run to disk. | 2N (read + write once) |
+| **Merge phase** | Merge sorted runs k-at-a-time; each pass costs 2(M + N).  | 2N per pass            |
+| **Total**       | With k-way merge, passes ≈ ⌈log_k r⌉ where r = initial runs. | O(N · log r) passes    |
+
+> **Key takeaway:** External merge sort is the foundation for sorting datasets
+> that exceed main memory. By splitting input into sorted runs and merging them
+> with a comparison walk, the algorithm produces sorted output with predictable
+> I/O cost. Disk I/O is the dominant cost: each merge pass costs **2(M + N)** —
+> every record is read and written once — and the total cost scales with the
+> number of passes. Minimizing passes (via larger buffers or higher merge fan-in
+> k) is the key performance lever.
+
+---
+
+## 22. External Merge Sort — The (B+1) Page Buffer Strategy
+
+The **(B+1) page buffer strategy** is the key optimization that makes external
+merge sort practical for very large datasets. It exploits available memory to
+maximize merge fan-in — the number of sorted runs that can be merged in a single
+pass — thereby reducing the total number of passes over the data.
+
+### How It Works
+
+With **B + 1** buffer pages available in main memory:
+
+- **B pages** serve as **input buffers** — one per sorted run being merged.
+- **1 page** serves as the **output buffer** — accumulated results are written to
+  disk when full.
+
+This arrangement enables a **B-way merge**: B sorted runs are merged
+simultaneously into one output run.
+
+### Packaging Phase (Run Creation)
+
+In the **packaging phase**, the input file (N pages total) is divided into chunks
+of B pages each. Each chunk is loaded into memory, sorted using an in-memory
+algorithm, and written back to disk as a **sorted run**.
+
+- **Pages read per run**: B
+- **Pages written per run**: B
+- **Number of initial runs**: $\lceil N / B \rceil$
+- **I/O cost**: 2N (one full read + one full write of the entire file)
+
+```text
+Phase 1: Packaging (Run Creation)
+
+  Disk file (N pages)
+    |
+    | Chunk 1: B pages   ->  sort in memory  ->  write sorted run R_1
+    | Chunk 2: B pages   ->  sort in memory  ->  write sorted run R_2
+    | ...                                        ...
+    | Chunk k: B pages   ->  sort in memory  ->  write sorted run R_k
+    v
+
+  Sorted runs on disk: R_1, R_2, ..., R_{ceil(N/B)}
+  Each run: B pages, internally sorted
+```
+
+### Remerge Phase (Merge Passes)
+
+In the **remerge phase**, sorted runs are merged B-at-a-time using the (B+1)
+buffer pages (B input buffers + 1 output buffer). Each pass reads all runs and
+writes a new set of merged runs. The number of passes is:
+
+$$\text{Merge passes} = \left\lceil \log_B \left( \left\lceil \frac{N}{B} \right\rceil \right) \right\rceil$$
+
+$$\text{Total passes} = 1 + \left\lceil \log_B \left( \left\lceil \frac{N}{B} \right\rceil \right) \right\rceil$$
+
+```text
+Phase 2: Remerge (B-way Merge)
+
+  Pass 1:  R_1, R_2, ..., R_B        ->  1 merged run  (fewer runs remain)
+           R_{B+1}, ..., R_{2B}       ->  1 merged run
+           ...
+           (ceil(N/B) / B) merged runs total
+
+  Pass 2:  merged runs from Pass 1    ->  further merged
+
+  Continue until 1 run remains.
+```
+
+### Step-by-Step Example
+
+Let **N = 1,000 pages** (the input file). We compare four buffer sizes.
+
+#### Case 1: B = 4 (B+1 = 5 buffer pages, 4-way merge)
+
+```text
+Packaging phase:
+  Runs created: ceil(1000 / 4) = 250 runs, each 4 pages
+  I/O: 2 x 1000 = 2,000
+
+Merge passes:
+  Pass 1: 250 runs -> ceil(250 / 4) = 63 runs
+  Pass 2:  63 runs -> ceil(63 / 4)  = 16 runs
+  Pass 3:  16 runs -> ceil(16 / 4)  =  4 runs
+  Pass 4:   4 runs -> ceil(4 / 4)   =  1 run  DONE
+
+Total passes: 1 (packaging) + 4 (merge) = 5
+Total I/O:   2,000 x 5 = 10,000 page I/Os
+```
+
+#### Case 2: B = 8 (B+1 = 9 buffer pages, 8-way merge)
+
+```text
+Packaging phase:
+  Runs created: ceil(1000 / 8) = 125 runs, each 8 pages
+  I/O: 2 x 1000 = 2,000
+
+Merge passes:
+  Pass 1: 125 runs -> ceil(125 / 8) = 16 runs
+  Pass 2:  16 runs -> ceil(16 / 8)  =  2 runs
+  Pass 3:   2 runs -> ceil(2 / 8)   =  1 run  DONE
+
+Total passes: 1 + 3 = 4
+Total I/O:   2,000 x 4 = 8,000 page I/Os
+```
+
+#### Case 3: B = 16 (B+1 = 17 buffer pages, 16-way merge)
+
+```text
+Packaging phase:
+  Runs created: ceil(1000 / 16) = 63 runs, each 16 pages
+  I/O: 2 x 1000 = 2,000
+
+Merge passes:
+  Pass 1:  63 runs -> ceil(63 / 16) = 4 runs
+  Pass 2:   4 runs -> ceil(4 / 16)  = 1 run  DONE
+
+Total passes: 1 + 2 = 3
+Total I/O:   2,000 x 3 = 6,000 page I/Os
+```
+
+#### Case 4: B = 32 (B+1 = 33 buffer pages, 32-way merge)
+
+```text
+Packaging phase:
+  Runs created: ceil(1000 / 32) = 32 runs, each 32 pages
+  I/O: 2 x 1000 = 2,000
+
+Merge passes:
+  Pass 1: 32 runs -> ceil(32 / 32) = 1 run  DONE
+
+Total passes: 1 + 1 = 2
+Total I/O:   2,000 x 2 = 4,000 page I/Os
+```
+
+### Impact of Buffer Size on Efficiency
+
+| Buffer pages B | B+1 total | Merge fan-in | Initial runs | Merge passes | Total passes | Total I/O |
+|----------------|-----------|--------------|--------------|-------------|-------------|-----------|
+| 4              | 5         | 4-way        | 250          | 4           | 5           | 10,000    |
+| 8              | 9         | 8-way        | 125          | 3           | 4           | 8,000     |
+| 16             | 17        | 16-way       | 63           | 2           | 3           | 6,000     |
+| 32             | 33        | 32-way       | 32           | 1           | 2           | 4,000     |
+
+#### Visualizing Pass Reduction with Larger Buffers
+
+```mermaid
+flowchart TD
+    subgraph Title["Merge Tree — N = 1,000 Pages"]
+        T["Larger B = higher fan-in = fewer passes"]
+        T2["Each pass costs 2N = 2,000 I/Os regardless of B"]
+    end
+
+    subgraph B4["B = 4 (4-way merge)"]
+        P1["Packaging"]
+        M1a[250 runs] --> M1b["Pass 1<br/>↓ 63 runs"]
+        M1b --> M1c["Pass 2<br/>↓ 16 runs"]
+        M1c --> M1d["Pass 3<br/>↓ 4 runs"]
+        M1d --> M1e["Pass 4<br/>↓ 1 run"]
+        P1 --> M1a
+    end
+
+    subgraph B8["B = 8 (8-way merge)"]
+        P2["Packaging"]
+        M2a[125 runs] --> M2b["Pass 1<br/>↓ 16 runs"]
+        M2b --> M2c["Pass 2<br/>↓ 2 runs"]
+        M2c --> M2d["Pass 3<br/>↓ 1 run"]
+        P2 --> M2a
+    end
+
+    subgraph B16["B = 16 (16-way merge)"]
+        P3["Packaging"]
+        M3a[63 runs] --> M3b["Pass 1<br/>↓ 4 runs"]
+        M3b --> M3c["Pass 2<br/>↓ 1 run"]
+        P3 --> M3a
+    end
+
+    subgraph B32["B = 32 (32-way merge)"]
+        P4["Packaging"]
+        M4a[32 runs] --> M4b["Pass 1<br/>↓ 1 run"]
+        P4 --> M4a
+    end
+
+    style B4 fill:#fff3e0
+    style B8 fill:#e3f2fd
+    style B16 fill:#e8f5e9
+    style B32 fill:#d1c4e9
+```
+
+```mermaid
+flowchart LR
+    subgraph Formula["Pass Count Formula"]
+        F1["Total passes =<br/>1 + ceil(log_B(ceil(N/B)))"]
+        F2["Each pass = 2N I/Os"]
+        F3["Total I/O = 2N × passes"]
+        F1 --> F2 --> F3
+    end
+
+    subgraph Insight["Why B Matters Most When Small"]
+        I1["Passes ∝ ln(N/B) / ln(B)"]
+        I2["Small B: doubling B<br/>≈ halves the passes"]
+        I3["Large B: doubling B<br/>≈ minor improvement"]
+        I1 --> I2 --> I3
+    end
+
+    Formula <--> Insight
+```
+
+### Why Doubling B Has Diminishing Returns
+
+The number of merge passes follows a **logarithmic** relationship:
+
+$$\text{Merge passes} \propto \frac{\ln(N/B)}{\ln(B)}$$
+
+- When B is small (e.g., 4 → 8), the denominator $\ln(B)$ doubles, roughly halving
+  the number of passes — a significant win.
+- When B is already large (e.g., 128 → 256), $\ln(B)$ grows very slowly, so the
+  marginal benefit of doubling buffers becomes small.
+
+> **Key takeaway:** The (B+1) page buffer strategy divides memory into B input
+> buffers and 1 output buffer, enabling a B-way merge that maximizes fan-in.
+> Increasing B reduces both the number of initial runs (packaging phase) and the
+> number of merge passes (remerge phase), following a logarithmic relationship.
+> The effect is most dramatic when B is small — doubling B from 4 to 8 cuts total
+> I/O from 10,000 to 8,000 (20%) on a 1,000-page file — and diminishes as B grows
+> larger. Since every pass costs 2N I/Os, the best optimization is to make B as
+> large as possible.
