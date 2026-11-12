@@ -1,0 +1,27 @@
+Class 10 Notes
+
+MongoDB
+
+why?
+
+dosnt store tables and rows you store json like documents
+
+BSON (Binary JSON) is MongoDB's binary-encoded serialization format that extends JSON with additional data types like dates, binary data, and 64-bit integers. While JSON is human-readable text format, BSON provides faster parsing, compact storage, and native support for MongoDB's rich data types. BSON enables efficient storage and retrieval while maintaining JSON's flexibility and document structure.
+
+MongoDB is a popular NoSQL database that is designed to store and manage large volumes of unstructured or semi-structured data. Unlike traditional relational databases that use tables and rows, MongoDB employs a document-oriented data model, where data is stored in flexible, JSON-like documents called BSON (Binary JSON). This allows for a dynamic schema, meaning that documents within the same collection can have different structures, making it easier to adapt to changing data requirements. MongoDB supports rich query capabilities, including filtering, sorting, and aggregation, enabling developers to perform complex queries efficiently.
+
+MongoDB is a NoSQL, document-oriented database designed for scalability, flexibility, and high performance. It stores data in JSON-like BSON (Binary JSON) format, allowing for the representation of complex data structures and enabling developers to work with unstructured or semi-structured data easily. MongoDB provides a rich query language, supports horizontal scaling through sharding, and offers features like indexing, aggregation, and real-time analytics.
+
+Cap Theory - How does cap theory work are we giving up one for another can we have 2 and what allows us to have each.
+
+Read and write concerns in MongoDB control data consistency and acknowledgment levels for operations. Write concerns specify acknowledgment requirements from replica set members, while read concerns determine data consistency guarantees for queries. Options range from unacknowledged writes to majority confirmation, and from local reads to causally consistent reads, balancing performance with data reliability requirements.
+
+Retryable reads and writes in MongoDB are client-side features that automatically retry certain database operations when they encounter transient network errors or temporary server unavailability, improving application resilience and user experience. The MongoDB drivers can automatically retry read operations and specific write operations (like inserts, updates, deletes, and findAndModify) exactly once when they fail due to network issues, replica set elections, or other recoverable errors, without requiring changes to application code. This feature is particularly valuable in distributed environments, cloud deployments, and replica set configurations where temporary connectivity issues or failover events are common, as it reduces the likelihood of application errors and provides a better user experience by handling transient failures transparently.
+
+NoSQL and SQL are two distinct paradigms for managing and storing data in databases. SQL (Structured Query Language) databases are relational and use a structured schema to define data types and relationships, making them ideal for complex queries and transactions. They ensure data integrity and support ACID (Atomicity, Consistency, Isolation, Durability) properties, which are crucial for applications requiring reliable transactions. In contrast, NoSQL databases are non-relational and offer a flexible schema, allowing for the storage of unstructured or semi-structured data.
+
+Collection methods in MongoDB provide comprehensive operations for data manipulation including CRUD operations (find, insert, update, delete), index management, and administrative functions. Key methods include createIndex(), drop(), count(), distinct(), and bulkWrite() for batch operations. These methods offer flexible options for data processing, schema validation, and collection maintenance.
+
+Aggregation in MongoDB is a powerful framework for data processing and transformation using a pipeline of stages. Each stage performs specific operations like filtering, grouping, sorting, or computing values, allowing complex data analytics and reporting. The aggregation pipeline offers operators for mathematical calculations, string manipulation, date operations, and advanced data transformations.
+
+MongoDB aggregation pipelines are composed of sequential stages that process and transform documents, where each stage performs a specific operation using various operators before passing results to the next stage. Stages like $match (filtering), $group (grouping and aggregating), $project (field selection and transformation), $sort (ordering), $lookup (joins), and $unwind (array expansion) can be combined in any order to create complex data processing workflows. Operators within these stages include arithmetic operators ($add, $multiply), comparison operators ($eq, $gt), array operators ($push, $addToSet), date operators ($dateToString, $year), and conditional operators ($cond, $ifNull), providing a powerful and flexible framework for data analysis, reporting, and ETL operations directly within the database.
