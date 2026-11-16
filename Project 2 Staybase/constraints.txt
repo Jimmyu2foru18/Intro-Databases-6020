@@ -1,5 +1,4 @@
-STAYBASE - DATABASE CONSTRAINTS
-==================================================
+STAYBASE - CONSTRAINTS
 
 1. No two users share the same user ID
    users.user_id is the primary key. MySQL requires primary-key values to be
@@ -77,18 +76,18 @@ STAYBASE - DATABASE CONSTRAINTS
     update triggers prevent reducing max_guests below an existing active
     booking's guest count.
 
-OPTIONAL: Booking total price formula
+Booking total price formula
     bookings.total_price is a STORED generated column calculated as
     DATEDIFF(check_out, check_in) * nightly_price + cleaning_fee. It cannot be
     independently supplied as a conflicting value.
 
-OPTIONAL: Only completed stays can be reviewed
+Only completed stays can be reviewed
     Review triggers require a matching booking with status COMPLETED and the
     same guest and listing IDs. UNIQUE (booking_id) permits at most one review
     per booking. If a completed booking is later changed to another status,
     separate policy logic is needed to decide what happens to its review.
 
-OPTIONAL: Payment must use the booking guest's own card
+Payment must use the booking guest's own card
     Payment triggers compare the card's guest_id with the booking's guest_id.
     They also require the payment amount to equal the generated booking total.
 
