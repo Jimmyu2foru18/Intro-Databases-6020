@@ -1,0 +1,111 @@
+STAYBASE - DATABASE CONSTRAINTS
+==================================================
+
+1. No two users share the same user ID
+   users.user_id is the primary key. MySQL requires primary-key values to be
+   unique and non-NULL. AUTO_INCREMENT generates IDs when omitted.
+
+2. Hosts and guests must already exist as users
+   listings.host_id, bookings.guest_id, and user_roles.user_id reference
+   users.user_id through foreign keys. Listing triggers require the owner to
+   have the host role; booking triggers require the booker to have the guest
+   role. Bank-account triggers also require the host role.
+
+3. A guest must have a valid, non-expired credit card to book
+   payment_cards stores the owning guest, expiration month/year, last four
+   digits, and a payment-provider token. The booking trigger requires at least
+   one card whose expiration month/year is current or later. A CHECK validates
+   that expiration_month is between 1 and 12. This verifies expiration data;
+   only the payment provider can confirm that a card is active and chargeable.
+
+4. No two listings share the same listing ID
+   listings.listing_id is the primary key and is generated with AUTO_INCREMENT.
+
+5. Every booking corresponds to an actual listing
+   bookings.listing_id is a foreign key to listings.listing_id. An invalid
+   listing reference is rejected by MySQL.
+
+6. A listing cannot have the same amenity more than once
+   listing_amenities has a composite primary key (listing_id, amenity_id).
+   The two foreign keys also require the referenced listing and amenity to
+   exist.
+
+7. A listing availability window and every booking must end after they start
+   CHECK constraints require bookable_end_date > bookable_start_date and
+   check_out > check_in. Booking triggers also validate a booking against the
+   listing's availability window. A listing-update trigger prevents changing
+   the availability window or guest capacity in a way that invalidates an
+   existing non-cancelled booking.
+
+8. A listing's review count and average rating match its reviews
+   listings stores review_count and average_rating. Review insert, update,
+   and delete triggers maintain these values. A CHECK restricts each review
+   rating to 1 through 5. These stored aggregates should be periodically
+   reconciled against reviews, especially after bulk imports or manual edits.
+
+9. A user may not book their own listing
+   The booking triggers compare bookings.guest_id with the listing's host_id
+   and reject a match.
+
+10. No two active (non-cancelled) bookings for a listing may overlap
+    The booking triggers search for another booking on the same listing whose
+    status is not CANCELLED. The overlap predicate is existing.check_in <
+    new.check_out AND existing.check_out > new.check_in. This permits one
+    reservation to check out on the same day the next one checks in. The
+    trigger locks the listing row with SELECT ... FOR UPDATE to serialize
+    competing booking attempts; concurrent-session tests are still required.
+
+11. A booking must fall inside the listing availability window
+    Booking triggers reject a check-in before bookable_start_date or a
+    check-out after bookable_end_date. The check-out boundary is inclusive
+    as the final date of the permitted window (it cannot be later than it).
+
+12. A guest cannot book the same listing twice with the same check-in date
+    bookings has UNIQUE (guest_id, listing_id, check_in). This also prevents a
+    replacement row with that same combination after a cancellation; the
+    current design intentionally retains that strict uniqueness rule.
+
+13. A listing's booking count equals its actual active bookings
+    listings.active_booking_count is maintained by booking insert, update,
+    and delete triggers. Active means status is anything other than CANCELLED,
+    including REQUESTED, CONFIRMED, and COMPLETED. Reconcile periodically with
+    a COUNT(*) grouped by listing_id to detect drift.
+
+14. Number of guests cannot exceed listing maximum
+    Booking triggers compare number_of_guests with listings.max_guests.
+    CHECK constraints require both values to be greater than zero. Listing
+    update triggers prevent reducing max_guests below an existing active
+    booking's guest count.
+
+OPTIONAL: Booking total price formula
+    bookings.total_price is a STORED generated column calculated as
+    DATEDIFF(check_out, check_in) * nightly_price + cleaning_fee. It cannot be
+    independently supplied as a conflicting value.
+
+OPTIONAL: Only completed stays can be reviewed
+    Review triggers require a matching booking with status COMPLETED and the
+    same guest and listing IDs. UNIQUE (booking_id) permits at most one review
+    per booking. If a completed booking is later changed to another status,
+    separate policy logic is needed to decide what happens to its review.
+
+OPTIONAL: Payment must use the booking guest's own card
+    Payment triggers compare the card's guest_id with the booking's guest_id.
+    They also require the payment amount to equal the generated booking total.
+
+ARRIVAL CONFIRMATION BEFORE RELEASE
+    Payment triggers reject status RELEASED unless the booking has a
+    guest_arrival_confirmed_at timestamp. They populate released_at if it is
+    missing. The current schema uses RELEASED as a payment status; a more
+    complete payment system would model host payouts separately.
+
+SECURITY AND DATA NOTES
+    Raw card numbers and CVV/CVC are not stored. A payment provider should
+    collect and tokenize card data. Bank account numbers are sensitive and
+    should be encrypted or tokenized with strict access controls in a real
+    deployment. Do not use synthetic imported host details as real identities.
+
+TESTING
+    Run booking_platform.sql first, then booking_platform_tests.sql in a clean
+    disposable database. Tests print PASS when invalid operations are rejected.
+    The scripts have not been executed against the user's own MySQL server;
+    verify them on the target MySQL version before submission or deployment.

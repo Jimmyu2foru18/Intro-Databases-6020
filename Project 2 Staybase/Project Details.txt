@@ -1,0 +1,43 @@
+StayBase – Course Project
+In this project you are developing the database for an online vacation-rental website (similar to Airbnb). You are implementing a version of StayBase.
+
+Description
+A user registers with a username, email, name, address and phone number. Each user is identified by a unique id.
+A user can be a host, a guest, or both.
+A host publishes listings. A listing is identified by an id and has a title, a description, a location (which may differ from the host's address), a nightly price, a cleaning fee, a maximum number of guests, a cancellation policy (flexible / moderate / strict) and a window of dates during which it can be booked.
+For each amenity (WiFi, pool, kitchen, ...) we keep its id, name and description. A listing may offer many amenities.
+The host provides bank information (bank name, routing number, account number) to receive payouts.
+A guest books a listing for a range of dates (check-in, check-out) and a number of guests. The booking total is nights × nightly price + cleaning fee.
+A booking is REQUESTED, then CONFIRMED by the host (within two business days of the request), and later COMPLETED, or it can be CANCELLED.
+The system stores credit-card information (card number, expiration date, CCV, name, billing address). The guest pays the booking total with one of their cards.
+The payment status is recorded (PENDING, PAID, REFUNDED, RELEASED). The guest confirms arrival at check-in, and the payout is released to the host after that.
+After a completed stay the guest may review the listing (rating 1 to 5, plus a comment).
+For each listing we store the number of active bookings, the number of reviews and the average rating (kept in the table for performance).
+Rules your database should enforce
+Decide for yourselves how many of these you can enforce and how (keys, CHECK, foreign keys, triggers). The list below is a suggestion, not a fixed count.
+
+Users
+No two users share the same user id.
+All hosts and guests must already exist as users.
+A guest must have a valid (non-expired) credit card to book.
+Listings
+No two listings share the same id.
+Every booking must correspond to an actual listing.
+A listing cannot have the same amenity more than once.
+A listing's availability window and every booking must end after they start.
+A listing's review count and average rating must match its reviews.
+Bookings
+A user may not book his or her own listing.
+No two active (non-cancelled) bookings of a listing may overlap in dates (check-out day = next check-in day is fine).
+A booking must fall inside the listing's availability window.
+A guest cannot book the same listing twice with the same check-in date.
+A listing's number of bookings must equal its actual number of active bookings.
+The number of guests cannot exceed the listing's maximum.
+Optional extras: total price must match nights × price + fee; only completed stays can be reviewed; a payment must use the booking guest's own card.
+
+Deliverables
+Design an ER / EER diagram for the system using Chen notation. (Phase I)
+Create the relational model in SQL (MySQL). (Phase II)
+Create constraints.txt explaining, in plain English, how you implemented each rule. (Phase III)
+Implement your constraints (triggers or otherwise) and show tests that bad data is rejected. Use MySQL 8.0 (InnoDB). (Phase III)
+Team up to three.
