@@ -267,6 +267,7 @@ BEGIN
     DECLARE v_start DATE DEFAULT NULL;
     DECLARE v_end DATE DEFAULT NULL;
     DECLARE v_cards INT DEFAULT 0;
+    DECLARE v_overlap INT DEFAULT 0;
 
     SELECT host_id, max_guests, bookable_start_date, bookable_end_date
       INTO v_host, v_capacity, v_start, v_end
@@ -293,6 +294,14 @@ BEGIN
           OR (expiration_year = YEAR(CURRENT_DATE) AND expiration_month >= MONTH(CURRENT_DATE)));
     IF v_cards = 0 THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Guest needs a non-expired payment card';
+    END IF;
+    SELECT COUNT(*) INTO v_overlap FROM bookings
+      WHERE listing_id = NEW.listing_id
+        AND status <> 'CANCELLED'
+        AND check_in < NEW.check_out
+        AND check_out > NEW.check_in;
+    IF v_overlap > 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Active booking overlaps an existing booking';
     END IF;
 END$$
 
@@ -303,6 +312,7 @@ BEGIN
     DECLARE v_start DATE DEFAULT NULL;
     DECLARE v_end DATE DEFAULT NULL;
     DECLARE v_cards INT DEFAULT 0;
+    DECLARE v_overlap INT DEFAULT 0;
 
     SELECT host_id, max_guests, bookable_start_date, bookable_end_date
       INTO v_host, v_capacity, v_start, v_end
@@ -329,6 +339,15 @@ BEGIN
           OR (expiration_year = YEAR(CURRENT_DATE) AND expiration_month >= MONTH(CURRENT_DATE)));
     IF v_cards = 0 THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Guest needs a non-expired payment card';
+    END IF;
+    SELECT COUNT(*) INTO v_overlap FROM bookings
+      WHERE listing_id = NEW.listing_id
+        AND booking_id <> OLD.booking_id
+        AND status <> 'CANCELLED'
+        AND check_in < NEW.check_out
+        AND check_out > NEW.check_in;
+    IF v_overlap > 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Active booking overlaps an existing booking';
     END IF;
 
     IF OLD.status = 'REQUESTED' AND NEW.status = 'CONFIRMED' THEN

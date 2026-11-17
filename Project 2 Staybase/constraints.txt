@@ -1,5 +1,4 @@
 STAYBASE - DATABASE CONSTRAINTS
-==================================================
 
 1. No two users share the same user ID
    users.user_id is the primary key. MySQL requires primary-key values to be
@@ -105,7 +104,7 @@ SECURITY AND DATA NOTES
     deployment. Do not use synthetic imported host details as real identities.
 
 TESTING
-    Run booking_platform.sql first, then booking_platform_tests.sql in a clean
+    Run Staybase.sql first, then staybase_test.sql in a clean
     disposable database. Tests print PASS when invalid operations are rejected.
     The scripts have not been executed against the user's own MySQL server;
     verify them on the target MySQL version before submission or deployment.
